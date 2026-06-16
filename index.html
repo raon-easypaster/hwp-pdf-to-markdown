@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HWP → Obsidian 변환기</title>
+    <style>
+        :root {
+            --primary: #3C3489;
+            --primary-hover: #2E276E;
+            --background: #FFFFFF;
+            --surface: #F8F7FF;
+            --border: #E4E2F0;
+            --text-main: #2C2A38;
+            --text-muted: #6C6A7C;
+            --success: #2E7D32;
+            --fail: #C62828;
+            --skip: #EF6C00;
+            --terminal-bg: #1A1921;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+            background-color: var(--surface);
+            color: var(--text-main);
+            line-height: 1.5;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        /* Header */
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        header h1 {
+            font-size: 2.2rem;
+            color: var(--primary);
+            font-weight: 700;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        header p {
+            color: var(--text-muted);
+            font-size: 1rem;
+            font-weight: 500;
+        }
+
+        /* Card Layout */
+        .card {
+            background-color: var(--background);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 30px;
+            margin-bottom: 24px;
+        }
+
+        .card-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin-bottom: 20px;
+            color: var(--primary);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        /* Form Controls */
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            font-size: 0.95rem;
+        }
+
+        .input-text {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 0.95rem;
+            background-color: var(--surface);
+            color: var(--text-main);
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .input-text:focus {
+            border-color: var(--primary);
+            background-color: var(--background);
+        }
+
+        .options-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            align-items: center;
+            margin-bottom: 24px;
+            padding-top: 5px;
+        }
+
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 500;
+            cursor: pointer;
+            user-select: none;
+            font-size: 0.95rem;
+        }
+
+        .checkbox-label input {
+            width: 18px;
+            height: 18px;
+            accent-color: var(--primary);
+            cursor: pointer;
+        }
+
+        .workers-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.95rem;
+        }
+
+        .workers-group label {
+            margin-bottom: 0;
+        }
+
+        .input-number {
+            width: 70px;
+            padding: 8px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background-color: var(--surface);
+            font-size: 0.95rem;
+            outline: none;
+            text-align: center;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 12px;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 14px 20px;
+            font-size: 1rem;
+            font-weight: 600;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.2s, opacity 0.2s;
+            outline: none;
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .btn-primary {
+            background-color: var(--primary);
+            color: var(--background);
+            flex: 2;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background-color: var(--primary-hover);
+        }
+
+        .btn-secondary {
+            background-color: var(--surface);
+            color: var(--text-main);
+            border: 1px solid var(--border);
+            flex: 1;
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background-color: var(--border);
+        }
+
+        /* File List Preview */
+        .preview-card {
+            display: none;
+        }
+
+        .badge {
+            background-color: var(--primary);
+            color: var(--background);
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .file-list {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background-color: var(--surface);
+            padding: 10px;
+            list-style: none;
+            font-size: 0.9rem;
+        }
+
+        .file-item {
+            padding: 6px 8px;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-main);
+            word-break: break-all;
+        }
+
+        .file-item:last-child {
+            border-bottom: none;
+        }
+
+        /* Progress Section */
+        .progress-card {
+            display: none;
+        }
+
+        .progress-bar-container {
+            width: 100%;
+            height: 12px;
+            background-color: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+
+        .progress-bar {
+            height: 100%;
+            width: 0%;
+            background-color: var(--primary);
+            transition: width 0.3s ease-in-out;
+        }
+
+        .terminal {
+            background-color: var(--terminal-bg);
+            border-radius: 6px;
+            padding: 15px;
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-size: 0.85rem;
+            color: #E0E0E6;
+            height: 300px;
+            overflow-y: auto;
+            line-height: 1.6;
+        }
+
+        .log-line {
+            margin-bottom: 4px;
+            word-break: break-all;
+        }
+
+        .status-ok { color: #81C784; }
+        .status-fail { color: #E57373; }
+        .status-skip { color: #FFB74D; }
+
+        /* Summary Panel */
+        .summary-card {
+            display: none;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-bottom: 25px;
+            text-align: center;
+        }
+
+        .stat-box {
+            padding: 20px 10px;
+            border-radius: 8px;
+            background-color: var(--surface);
+            border: 1px solid var(--border);
+        }
+
+        .stat-box.ok { border-color: #81C784; }
+        .stat-box.fail { border-color: #E57373; }
+        .stat-box.skip { border-color: #FFB74D; }
+
+        .stat-number {
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+
+        .stat-number.ok { color: var(--success); }
+        .stat-number.fail { color: var(--fail); }
+        .stat-number.skip { color: var(--skip); }
+
+        .stat-label {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            font-weight: 600;
+        }
+
+        /* Footer */
+        footer {
+            text-align: center;
+            margin-top: 40px;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        /* Spinner */
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 8px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <!-- Header -->
+    <header>
+        <h1>📂 HWP → Obsidian 변환기</h1>
+        <p>라온동행교회 | 쉬운목사</p>
+    </header>
+
+    <!-- Settings Card -->
+    <div class="card">
+        <div class="card-title">변환 설정</div>
+        
+        <div class="form-group">
+            <label for="inputFolder">한글 파일(HWP) 폴더 경로</label>
+            <input type="text" id="inputFolder" class="input-text" placeholder="예: /Users/galeb76/Documents/설교원고">
+        </div>
+
+        <div class="form-group">
+            <label for="vaultPath">Obsidian 보관소(Vault) 저장 경로</label>
+            <input type="text" id="vaultPath" class="input-text" value="/Users/galeb76/Library/Mobile Documents/iCloud~md~obsidian/Documents/Easypaster/000_Inbox/004_한글변환">
+        </div>
+
+        <div class="options-row">
+            <label class="checkbox-label">
+                <input type="checkbox" id="overwrite">
+                덮어쓰기 (overwrite)
+            </label>
+            
+            <label class="checkbox-label">
+                <input type="checkbox" id="recursive">
+                하위폴더 포함 (recursive)
+            </label>
+
+            <div class="workers-group">
+                <label for="workers">작업자 수:</label>
+                <input type="number" id="workers" class="input-number" min="1" max="8" value="4">
+            </div>
+        </div>
+
+        <div class="button-group">
+            <button type="button" id="scanBtn" class="btn btn-secondary" onclick="scanFiles()">파일 목록 확인</button>
+            <button type="button" id="startBtn" class="btn btn-primary" onclick="startConversion()">변환 시작</button>
+        </div>
+    </div>
+
+    <!-- File List Preview Card -->
+    <div id="previewCard" class="card preview-card">
+        <div class="card-title">
+            감지된 한글 파일 목록
+            <span id="fileBadge" class="badge">0</span>
+        </div>
+        <ul id="fileList" class="file-list">
+            <!-- Dynamic list items -->
+        </ul>
+    </div>
+
+    <!-- Progress Card -->
+    <div id="progressCard" class="card progress-card">
+        <div class="card-title">변환 진행 현황</div>
+        <div class="progress-bar-container">
+            <div id="progressBar" class="progress-bar"></div>
+        </div>
+        <div id="logFeed" class="terminal">
+            <!-- Real-time log entries -->
+        </div>
+    </div>
+
+    <!-- Result Summary Card -->
+    <div id="resultCard" class="card summary-card">
+        <div class="card-title">변환 완료 리포트</div>
+        <div class="stats-grid">
+            <div class="stat-box ok">
+                <div id="statOk" class="stat-number ok">0</div>
+                <div class="stat-label">✅ 성공</div>
+            </div>
+            <div class="stat-box fail">
+                <div id="statFail" class="stat-number fail">0</div>
+                <div class="stat-label">❌ 실패</div>
+            </div>
+            <div class="stat-box skip">
+                <div id="statSkip" class="stat-number skip">0</div>
+                <div class="stat-label">⏭ 건너뜀</div>
+            </div>
+        </div>
+        <div class="button-group">
+            <button type="button" class="btn btn-primary" onclick="openVaultInObsidian()">Obsidian에서 열기</button>
+            <button type="button" class="btn btn-secondary" onclick="resetUI()">다시 변환</button>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer>
+        라온동행교회 쉬운목사 | 자비스 자동화 시스템
+    </footer>
+</div>
+
+<script>
+    let activeTotalCount = 0;
+
+    async function scanFiles() {
+        const inputFolder = document.getElementById('inputFolder').value.trim();
+        const recursive = document.getElementById('recursive').checked;
+        const scanBtn = document.getElementById('scanBtn');
+        const previewCard = document.getElementById('previewCard');
+        const fileList = document.getElementById('fileList');
+        const fileBadge = document.getElementById('fileBadge');
+
+        if (!inputFolder) {
+            alert('한글 파일 폴더 경로를 입력해주세요.');
+            return;
+        }
+
+        scanBtn.disabled = true;
+        scanBtn.textContent = '스캔 중...';
+        
+        try {
+            const url = `/files?folder=${encodeURIComponent(inputFolder)}&recursive=${recursive}`;
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error('파일 목록을 가져오는 중 오류가 발생했습니다.');
+            }
+            const data = await response.json();
+            
+            if (data.error) {
+                alert(data.error);
+                previewCard.style.display = 'none';
+                return;
+            }
+
+            fileList.innerHTML = '';
+            activeTotalCount = data.count;
+            fileBadge.textContent = `${data.count}개`;
+
+            if (data.count === 0) {
+                const li = document.createElement('li');
+                li.className = 'file-item';
+                li.textContent = '폴더 안에 HWP 파일이 없습니다.';
+                fileList.appendChild(li);
+            } else {
+                data.files.forEach(file => {
+                    const li = document.createElement('li');
+                    li.className = 'file-item';
+                    li.textContent = file;
+                    fileList.appendChild(li);
+                });
+            }
+            
+            previewCard.style.display = 'block';
+            previewCard.scrollIntoView({ behavior: 'smooth' });
+
+        } catch (error) {
+            alert('에러 발생: ' + error.message);
+        } finally {
+            scanBtn.disabled = false;
+            scanBtn.textContent = '파일 목록 확인';
+        }
+    }
+
+    async function startConversion() {
+        const inputFolder = document.getElementById('inputFolder').value.trim();
+        const vaultPath = document.getElementById('vaultPath').value.trim();
+        const overwrite = document.getElementById('overwrite').checked;
+        const recursive = document.getElementById('recursive').checked;
+        const workers = parseInt(document.getElementById('workers').value) || 4;
+        
+        const startBtn = document.getElementById('startBtn');
+        const scanBtn = document.getElementById('scanBtn');
+        const progressCard = document.getElementById('progressCard');
+        const logFeed = document.getElementById('logFeed');
+        const progressBar = document.getElementById('progressBar');
+        const resultCard = document.getElementById('resultCard');
+
+        if (!inputFolder) {
+            alert('한글 파일 폴더 경로를 입력해주세요.');
+            return;
+        }
+        if (!vaultPath) {
+            alert('Obsidian 보관소 경로를 입력해주세요.');
+            return;
+        }
+
+        // Reset UI for starting
+        startBtn.disabled = true;
+        scanBtn.disabled = true;
+        startBtn.innerHTML = '<span class="spinner"></span> 변환 중...';
+        
+        progressCard.style.display = 'block';
+        logFeed.innerHTML = '';
+        progressBar.style.width = '0%';
+        resultCard.style.display = 'none';
+        
+        progressCard.scrollIntoView({ behavior: 'smooth' });
+
+        try {
+            const response = await fetch('/convert', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    input_folder: inputFolder,
+                    vault_path: vaultPath,
+                    overwrite: overwrite,
+                    recursive: recursive,
+                    workers: workers
+                })
+            });
+
+            if (!response.ok) {
+                const errData = await response.json();
+                throw new Error(errData.error || '변환 중 오류가 발생했습니다.');
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let processed = 0;
+            let total = 0;
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop(); // Hold remaining partial line
+
+                for (const line of lines) {
+                    if (!line.trim()) continue;
+                    try {
+                        const data = JSON.parse(line);
+                        
+                        if (data.type === 'start') {
+                            total = data.total;
+                            progressBar.style.width = '0%';
+                            
+                            const initLine = document.createElement('div');
+                            initLine.className = 'log-line';
+                            initLine.style.fontWeight = 'bold';
+                            initLine.textContent = `🚀 변환 시작 (총 ${total}개 파일)...`;
+                            logFeed.appendChild(initLine);
+                        }
+                        else if (data.type === 'progress') {
+                            processed++;
+                            let icon = '❓';
+                            let statusClass = '';
+                            
+                            if (data.status === 'ok') {
+                                icon = '✅';
+                                statusClass = 'status-ok';
+                            } else if (data.status === 'skip') {
+                                icon = '⏭';
+                                statusClass = 'status-skip';
+                            } else {
+                                icon = '❌';
+                                statusClass = 'status-fail';
+                            }
+
+                            const lineDiv = document.createElement('div');
+                            lineDiv.className = `log-line ${statusClass}`;
+                            lineDiv.textContent = `${icon} ${data.file} → ${data.method}`;
+                            logFeed.appendChild(lineDiv);
+                            logFeed.scrollTop = logFeed.scrollHeight;
+
+                            if (total > 0) {
+                                const pct = Math.round((processed / total) * 100);
+                                progressBar.style.width = `${pct}%`;
+                            }
+                        }
+                        else if (data.type === 'done') {
+                            progressBar.style.width = '100%';
+                            
+                            // Set results
+                            document.getElementById('statOk').textContent = data.ok;
+                            document.getElementById('statFail').textContent = data.fail;
+                            document.getElementById('statSkip').textContent = data.skip;
+                            
+                            const finishLine = document.createElement('div');
+                            finishLine.className = 'log-line';
+                            finishLine.style.fontWeight = 'bold';
+                            finishLine.style.color = '#81C784';
+                            finishLine.textContent = `🎉 변환 완료! (성공: ${data.ok}, 실패: ${data.fail}, 건너뜀: ${data.skip})`;
+                            logFeed.appendChild(finishLine);
+                            logFeed.scrollTop = logFeed.scrollHeight;
+
+                            resultCard.style.display = 'block';
+                            resultCard.scrollIntoView({ behavior: 'smooth' });
+                        }
+                    } catch (e) {
+                        console.error('Line processing error:', e, line);
+                    }
+                }
+            }
+
+        } catch (error) {
+            alert('에러 발생: ' + error.message);
+        } finally {
+            startBtn.disabled = false;
+            scanBtn.disabled = false;
+            startBtn.innerHTML = '변환 시작';
+        }
+    }
+
+    async function openVaultInObsidian() {
+        const vaultPath = document.getElementById('vaultPath').value.trim();
+        if (!vaultPath) {
+            alert('Obsidian 보관소 경로가 입력되지 않았습니다.');
+            return;
+        }
+
+        try {
+            const response = await fetch('/open-vault', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ vault_path: vaultPath })
+            });
+
+            if (!response.ok) {
+                const errData = await response.json();
+                throw new Error(errData.error || '보관소 열기 도중 에러가 발생했습니다.');
+            }
+        } catch (error) {
+            alert('에러 발생: ' + error.message);
+        }
+    }
+
+    function resetUI() {
+        document.getElementById('previewCard').style.display = 'none';
+        document.getElementById('progressCard').style.display = 'none';
+        document.getElementById('resultCard').style.display = 'none';
+        document.getElementById('logFeed').innerHTML = '';
+        document.getElementById('progressBar').style.width = '0%';
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+</script>
+
+</body>
+</html>
