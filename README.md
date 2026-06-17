@@ -1,6 +1,6 @@
-# 📂 HWP → Obsidian 일괄 변환기 (macOS & Windows 지원)
+# 📂 HWP/PDF → Obsidian 일괄 변환기 (macOS & Windows 지원)
 
-한글 문서(.hwp)들을 일괄적으로 마크다운(.md) 양식으로 깨끗하게 변환하여 Obsidian(옵시디언) 보관소(Vault)로 즉시 수집해 주는 로컬 웹 애플리케이션입니다.
+한글 문서(.hwp) 및 PDF 문서(.pdf)들을 일괄적으로 마크다운(.md) 양식으로 깨끗하게 변환하여 Obsidian(옵시디언) 보관소(Vault)로 즉시 수집해 주는 로컬 웹 애플리케이션입니다.
 
 ---
 
