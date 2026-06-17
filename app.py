@@ -9,6 +9,7 @@ import concurrent.futures
 from pathlib import Path
 from flask import Flask, request, jsonify, send_from_directory, Response, stream_with_context
 import olefile
+import pypdf
 
 app = Flask(__name__, static_folder='.', static_url_path='')
 
@@ -155,10 +156,24 @@ def extract_hwp_text(hwp_path):
         
     raise ValueError("All HWP extraction stages failed or returned empty text.")
 
-def format_markdown(text, hwp_path):
+def extract_pdf_text(pdf_path):
+    try:
+        reader = pypdf.PdfReader(pdf_path)
+        text_parts = []
+        for page in reader.pages:
+            extracted = page.extract_text()
+            if extracted:
+                text_parts.append(extracted)
+        return "\n".join(text_parts)
+    except Exception as e:
+        raise ValueError(f"PDF 텍스트 추출 중 오류가 발생했습니다: {str(e)}")
+
+def format_markdown(text, file_path):
     today_str = datetime.date.today().isoformat()
-    title = hwp_path.stem
-    source = hwp_path.name
+    title = file_path.stem
+    source = file_path.name
+    ext = file_path.suffix.lower()
+    tag = "pdf-converted" if ext == ".pdf" else "hwp-converted"
     
     frontmatter = (
         "---\n"
@@ -166,7 +181,7 @@ def format_markdown(text, hwp_path):
         f"source: \"{source}\"\n"
         f"converted: \"{today_str}\"\n"
         "tags:\n"
-        "  - hwp-converted\n"
+        f"  - {tag}\n"
         "---\n"
     )
     
@@ -227,23 +242,29 @@ def format_markdown(text, hwp_path):
             
     return frontmatter + "\n".join(final_lines)
 
-def convert_file(hwp_path, dest_path, overwrite):
-    filename = hwp_path.name
+def convert_file(file_path, dest_path, overwrite):
+    filename = file_path.name
     if not overwrite and dest_path.exists():
         return filename, 'skip', 'skip'
         
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        text, method = extract_hwp_text(hwp_path)
+        ext = file_path.suffix.lower()
+        if ext == '.pdf':
+            text = extract_pdf_text(file_path)
+            method = 'pypdf'
+        else:
+            text, method = extract_hwp_text(file_path)
+            
         if not text.strip():
             raise ValueError("No text content could be extracted")
         
-        markdown_content = format_markdown(text, hwp_path)
+        markdown_content = format_markdown(text, file_path)
         with open(dest_path, 'w', encoding='utf-8') as f:
             f.write(markdown_content)
         return filename, 'ok', method
     except Exception as e:
-        log_error(hwp_path, str(e))
+        log_error(file_path, str(e))
         return filename, 'fail', '실패'
 
 @app.route('/')
@@ -261,22 +282,23 @@ def get_files():
     if not folder_path.exists() or not folder_path.is_dir():
         return jsonify({"files": [], "count": 0, "error": "폴더가 존재하지 않거나 디렉토리가 아닙니다."}), 200
         
-    hwp_files = []
+    detected_files = []
     try:
+        valid_extensions = {'.hwp', '.pdf'}
         if recursive:
             for p in folder_path.rglob('*'):
-                if p.is_file() and p.suffix.lower() == '.hwp':
-                    hwp_files.append(p.name)
+                if p.is_file() and p.suffix.lower() in valid_extensions:
+                    detected_files.append(p.name)
         else:
             for p in folder_path.glob('*'):
-                if p.is_file() and p.suffix.lower() == '.hwp':
-                    hwp_files.append(p.name)
+                if p.is_file() and p.suffix.lower() in valid_extensions:
+                    detected_files.append(p.name)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
         
     return jsonify({
-        "files": sorted(hwp_files),
-        "count": len(hwp_files)
+        "files": sorted(detected_files),
+        "count": len(detected_files)
     })
 
 @app.route('/convert', methods=['POST'])
@@ -297,17 +319,18 @@ def convert():
     if not input_path.exists() or not input_path.is_dir():
         return jsonify({"error": "입력 폴더가 존재하지 않습니다."}), 400
         
-    hwp_files = []
+    files_to_convert = []
+    valid_extensions = {'.hwp', '.pdf'}
     if recursive:
         for p in input_path.rglob('*'):
-            if p.is_file() and p.suffix.lower() == '.hwp':
-                hwp_files.append(p)
+            if p.is_file() and p.suffix.lower() in valid_extensions:
+                files_to_convert.append(p)
     else:
         for p in input_path.glob('*'):
-            if p.is_file() and p.suffix.lower() == '.hwp':
-                hwp_files.append(p)
+            if p.is_file() and p.suffix.lower() in valid_extensions:
+                files_to_convert.append(p)
                 
-    total_files = len(hwp_files)
+    total_files = len(files_to_convert)
     
     def generate():
         ok_count = 0
@@ -322,21 +345,21 @@ def convert():
             
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
             future_to_file = {}
-            for hwp_path in hwp_files:
-                relative_path = hwp_path.relative_to(input_path)
+            for file_path in files_to_convert:
+                relative_path = file_path.relative_to(input_path)
                 dest_path = vault_path_resolved / relative_path.with_suffix('.md')
-                future = executor.submit(convert_file, hwp_path, dest_path, overwrite)
-                future_to_file[future] = hwp_path
+                future = executor.submit(convert_file, file_path, dest_path, overwrite)
+                future_to_file[future] = file_path
                 
             for future in concurrent.futures.as_completed(future_to_file):
-                hwp_path = future_to_file[future]
+                file_path = future_to_file[future]
                 try:
                     filename, status, method = future.result()
                 except Exception as e:
-                    filename = hwp_path.name
+                    filename = file_path.name
                     status = 'fail'
                     method = '실패'
-                    log_error(hwp_path, f"Thread execution error: {str(e)}")
+                    log_error(file_path, f"Thread execution error: {str(e)}")
                     
                 if status == 'ok':
                     ok_count += 1
@@ -361,6 +384,7 @@ def convert():
         }, ensure_ascii=False) + "\n"
         
     return Response(stream_with_context(generate()), mimetype='application/x-ndjson')
+
 
 @app.route('/open-vault', methods=['POST'])
 def open_vault():

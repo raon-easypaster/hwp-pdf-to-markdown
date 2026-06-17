@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HWP → Obsidian 변환기</title>
+    <title>문서(HWP/PDF) → Obsidian 변환기</title>
     <style>
         :root {
             --primary: #3C3489;
@@ -352,7 +352,7 @@
 <div class="container">
     <!-- Header -->
     <header>
-        <h1>📂 HWP → Obsidian 변환기</h1>
+        <h1>📂 문서(HWP/PDF) → Obsidian 변환기</h1>
         <p>라온동행교회 | 쉬운목사</p>
     </header>
 
@@ -361,8 +361,8 @@
         <div class="card-title">변환 설정</div>
         
         <div class="form-group">
-            <label for="inputFolder">한글 파일(HWP) 폴더 경로</label>
-            <input type="text" id="inputFolder" class="input-text" placeholder="예: /Users/galeb76/Documents/설교원고">
+            <label for="inputFolder">문서 파일(HWP/PDF) 폴더 경로</label>
+            <input type="text" id="inputFolder" class="input-text" placeholder="예: /Users/galeb76/Documents">
         </div>
 
         <div class="form-group">
@@ -396,7 +396,7 @@
     <!-- File List Preview Card -->
     <div id="previewCard" class="card preview-card">
         <div class="card-title">
-            감지된 한글 파일 목록
+            감지된 HWP/PDF 파일 목록
             <span id="fileBadge" class="badge">0</span>
         </div>
         <ul id="fileList" class="file-list">
@@ -456,7 +456,7 @@
         const fileBadge = document.getElementById('fileBadge');
 
         if (!inputFolder) {
-            alert('한글 파일 폴더 경로를 입력해주세요.');
+            alert('문서 파일 폴더 경로를 입력해주세요.');
             return;
         }
 
@@ -484,7 +484,7 @@
             if (data.count === 0) {
                 const li = document.createElement('li');
                 li.className = 'file-item';
-                li.textContent = '폴더 안에 HWP 파일이 없습니다.';
+                li.textContent = '폴더 안에 HWP 또는 PDF 파일이 없습니다.';
                 fileList.appendChild(li);
             } else {
                 data.files.forEach(file => {
@@ -521,7 +521,7 @@
         const resultCard = document.getElementById('resultCard');
 
         if (!inputFolder) {
-            alert('한글 파일 폴더 경로를 입력해주세요.');
+            alert('문서 파일 폴더 경로를 입력해주세요.');
             return;
         }
         if (!vaultPath) {

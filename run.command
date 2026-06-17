@@ -26,9 +26,9 @@ if [ ! -d "venv" ]; then
 fi
 
 # 3. Install/Update Dependencies
-echo "📥 필요한 패키지(Flask, pyhwp, olefile, six 등)를 설치하고 있습니다..."
+echo "📥 필요한 패키지(Flask, pyhwp, olefile, six, pypdf 등)를 설치하고 있습니다..."
 ./venv/bin/pip install --upgrade pip &> /dev/null
-./venv/bin/pip install pyhwp olefile tqdm flask six
+./venv/bin/pip install pyhwp olefile tqdm flask six pypdf
 if [ $? -ne 0 ]; then
     echo "❌ 패키지 설치 실패"
     read -p "엔터를 누르면 종료됩니다..."

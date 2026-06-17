@@ -28,9 +28,9 @@ if not exist venv (
 )
 
 :: 3. Install/Update Dependencies
-echo 📥 필요한 패키지(Flask, pyhwp, olefile, six 등)를 설치하고 있습니다...
+echo 📥 필요한 패키지(Flask, pyhwp, olefile, six, pypdf 등)를 설치하고 있습니다...
 venv\Scripts\python -m pip install --upgrade pip >nul 2>nul
-venv\Scripts\pip install pyhwp olefile tqdm flask six
+venv\Scripts\pip install pyhwp olefile tqdm flask six pypdf
 if %errorlevel% neq 0 (
     echo ❌ 패키지 설치 실패
     pause
