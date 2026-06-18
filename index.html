@@ -385,12 +385,15 @@
             <input type="password" id="apiKey" class="input-text" placeholder="입력 시 설교 요약(3가지 요약/전체 요약) 및 신학 태그가 상단에 추가됩니다.">
         </div>
 
+        <div class="form-group">
+            <label for="overwriteMode">기존 동일한 마크다운 파일 존재 시 처리 방식</label>
+            <select id="overwriteMode" class="input-text" style="background-color: var(--surface);">
+                <option value="skip">변환하지 않고 건너뛰기 (기본값)</option>
+                <option value="overwrite">덮어쓰고 다시 변환하기</option>
+            </select>
+        </div>
+
         <div class="options-row">
-            <label class="checkbox-label">
-                <input type="checkbox" id="overwrite">
-                덮어쓰기 (overwrite)
-            </label>
-            
             <label class="checkbox-label">
                 <input type="checkbox" id="recursive">
                 하위폴더 포함 (recursive)
@@ -474,6 +477,9 @@
         if (localStorage.getItem('apiKey')) {
             document.getElementById('apiKey').value = localStorage.getItem('apiKey');
         }
+        if (localStorage.getItem('overwriteMode')) {
+            document.getElementById('overwriteMode').value = localStorage.getItem('overwriteMode');
+        }
     });
 
     async function scanFiles() {
@@ -539,13 +545,15 @@
         const inputFolder = document.getElementById('inputFolder').value.trim();
         const vaultPath = document.getElementById('vaultPath').value.trim();
         const apiKey = document.getElementById('apiKey').value.trim();
-        const overwrite = document.getElementById('overwrite').checked;
+        const overwriteMode = document.getElementById('overwriteMode').value;
+        const overwrite = overwriteMode === 'overwrite';
         const recursive = document.getElementById('recursive').checked;
         const workers = parseInt(document.getElementById('workers').value) || 4;
         
         localStorage.setItem('inputFolder', inputFolder);
         localStorage.setItem('vaultPath', vaultPath);
         localStorage.setItem('apiKey', apiKey);
+        localStorage.setItem('overwriteMode', overwriteMode);
         
         const startBtn = document.getElementById('startBtn');
         const scanBtn = document.getElementById('scanBtn');
