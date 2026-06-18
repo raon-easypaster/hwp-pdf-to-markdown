@@ -324,7 +324,6 @@ def convert():
     
     request_files = data.get('files', [])
     if request_files:
-        overwrite = True
         for f in request_files:
             file_path = input_path / f
             if file_path.exists() and file_path.is_file():
