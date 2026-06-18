@@ -321,14 +321,22 @@ def convert():
         
     files_to_convert = []
     valid_extensions = {'.hwp', '.pdf'}
-    if recursive:
-        for p in input_path.rglob('*'):
-            if p.is_file() and p.suffix.lower() in valid_extensions:
-                files_to_convert.append(p)
+    
+    request_files = data.get('files', [])
+    if request_files:
+        for f in request_files:
+            file_path = input_path / f
+            if file_path.exists() and file_path.is_file():
+                files_to_convert.append(file_path)
     else:
-        for p in input_path.glob('*'):
-            if p.is_file() and p.suffix.lower() in valid_extensions:
-                files_to_convert.append(p)
+        if recursive:
+            for p in input_path.rglob('*'):
+                if p.is_file() and p.suffix.lower() in valid_extensions:
+                    files_to_convert.append(p)
+        else:
+            for p in input_path.glob('*'):
+                if p.is_file() and p.suffix.lower() in valid_extensions:
+                    files_to_convert.append(p)
                 
     total_files = len(files_to_convert)
     
@@ -353,10 +361,10 @@ def convert():
                 
             for future in concurrent.futures.as_completed(future_to_file):
                 file_path = future_to_file[future]
+                relative_file_path = str(file_path.relative_to(input_path))
                 try:
                     filename, status, method = future.result()
                 except Exception as e:
-                    filename = file_path.name
                     status = 'fail'
                     method = '실패'
                     log_error(file_path, f"Thread execution error: {str(e)}")
@@ -370,7 +378,7 @@ def convert():
                     
                 yield json.dumps({
                     "type": "progress",
-                    "file": filename,
+                    "file": relative_file_path,
                     "status": status,
                     "method": method
                 }, ensure_ascii=False) + "\n"

@@ -202,6 +202,16 @@
             background-color: var(--border);
         }
 
+        .btn-danger {
+            background-color: var(--fail);
+            color: var(--background);
+            flex: 1.5;
+        }
+
+        .btn-danger:hover:not(:disabled) {
+            background-color: #B71C1C;
+        }
+
         /* File List Preview */
         .preview-card {
             display: none;
@@ -434,6 +444,7 @@
         </div>
         <div class="button-group">
             <button type="button" class="btn btn-primary" onclick="openVaultInObsidian()">Obsidian에서 열기</button>
+            <button type="button" id="retryBtn" class="btn btn-danger" style="display: none;" onclick="startConversion(true)">실패 파일 재시도</button>
             <button type="button" class="btn btn-secondary" onclick="resetUI()">다시 변환</button>
         </div>
     </div>
@@ -446,6 +457,7 @@
 
 <script>
     let activeTotalCount = 0;
+    let failedFiles = [];
 
     async function scanFiles() {
         const inputFolder = document.getElementById('inputFolder').value.trim();
@@ -506,7 +518,7 @@
         }
     }
 
-    async function startConversion() {
+    async function startConversion(isRetry = false) {
         const inputFolder = document.getElementById('inputFolder').value.trim();
         const vaultPath = document.getElementById('vaultPath').value.trim();
         const overwrite = document.getElementById('overwrite').checked;
@@ -515,6 +527,7 @@
         
         const startBtn = document.getElementById('startBtn');
         const scanBtn = document.getElementById('scanBtn');
+        const retryBtn = document.getElementById('retryBtn');
         const progressCard = document.getElementById('progressCard');
         const logFeed = document.getElementById('logFeed');
         const progressBar = document.getElementById('progressBar');
@@ -529,31 +542,53 @@
             return;
         }
 
+        let filesToSubmit = null;
+        if (isRetry) {
+            filesToSubmit = [...failedFiles];
+        }
+        failedFiles = [];
+
         // Reset UI for starting
         startBtn.disabled = true;
         scanBtn.disabled = true;
+        retryBtn.disabled = true;
         startBtn.innerHTML = '<span class="spinner"></span> 변환 중...';
         
         progressCard.style.display = 'block';
-        logFeed.innerHTML = '';
-        progressBar.style.width = '0%';
+        if (!isRetry) {
+            logFeed.innerHTML = '';
+            progressBar.style.width = '0%';
+        } else {
+            const sep = document.createElement('div');
+            sep.className = 'log-line';
+            sep.style.color = '#FFB74D';
+            sep.style.fontWeight = 'bold';
+            sep.textContent = '🔄 실패한 파일 재시도 시작...';
+            logFeed.appendChild(sep);
+            logFeed.scrollTop = logFeed.scrollHeight;
+        }
         resultCard.style.display = 'none';
         
         progressCard.scrollIntoView({ behavior: 'smooth' });
 
         try {
+            const payload = {
+                input_folder: inputFolder,
+                vault_path: vaultPath,
+                overwrite: overwrite,
+                recursive: recursive,
+                workers: workers
+            };
+            if (isRetry && filesToSubmit) {
+                payload.files = filesToSubmit;
+            }
+
             const response = await fetch('/convert', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({
-                    input_folder: inputFolder,
-                    vault_path: vaultPath,
-                    overwrite: overwrite,
-                    recursive: recursive,
-                    workers: workers
-                })
+                body: JSON.stringify(payload)
             });
 
             if (!response.ok) {
@@ -604,6 +639,7 @@
                             } else {
                                 icon = '❌';
                                 statusClass = 'status-fail';
+                                failedFiles.push(data.file);
                             }
 
                             const lineDiv = document.createElement('div');
@@ -633,6 +669,13 @@
                             logFeed.appendChild(finishLine);
                             logFeed.scrollTop = logFeed.scrollHeight;
 
+                            if (failedFiles.length > 0) {
+                                retryBtn.style.display = 'inline-flex';
+                                retryBtn.disabled = false;
+                            } else {
+                                retryBtn.style.display = 'none';
+                            }
+
                             resultCard.style.display = 'block';
                             resultCard.scrollIntoView({ behavior: 'smooth' });
                         }
@@ -647,6 +690,9 @@
         } finally {
             startBtn.disabled = false;
             scanBtn.disabled = false;
+            if (failedFiles.length > 0) {
+                retryBtn.disabled = false;
+            }
             startBtn.innerHTML = '변환 시작';
         }
     }
@@ -680,8 +726,10 @@
         document.getElementById('previewCard').style.display = 'none';
         document.getElementById('progressCard').style.display = 'none';
         document.getElementById('resultCard').style.display = 'none';
+        document.getElementById('retryBtn').style.display = 'none';
         document.getElementById('logFeed').innerHTML = '';
         document.getElementById('progressBar').style.width = '0%';
+        failedFiles = [];
         window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 </script>
