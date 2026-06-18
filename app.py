@@ -10,6 +10,7 @@ from pathlib import Path
 from flask import Flask, request, jsonify, send_from_directory, Response, stream_with_context
 import olefile
 import pypdf
+import urllib.request
 
 app = Flask(__name__, static_folder='.', static_url_path='')
 
@@ -168,28 +169,159 @@ def extract_pdf_text(pdf_path):
     except Exception as e:
         raise ValueError(f"PDF 텍스트 추출 중 오류가 발생했습니다: {str(e)}")
 
-def format_markdown(text, file_path):
-    today_str = datetime.date.today().isoformat()
-    title = file_path.stem
-    source = file_path.name
-    ext = file_path.suffix.lower()
-    tag = "pdf-converted" if ext == ".pdf" else "hwp-converted"
+SYSTEM_PROMPT = """당신은 목회자 설교문/성경 묵상 문서를 분석하는 전문가입니다. 
+한국 교회의 복음주의-성결 신학 전통을 이해하며, 웨슬리안 신학의 맥락에서 설교를 분석합니다.
+
+반드시 다음 형식으로 정확히 출력하세요:
+
+TITLE: [설교 제목]
+BIBLE: [성경 구절]
+THEME: [주제]
+KEYWORDS: [키워드들]
+
+SUMMARY_THREE:
+- [첫 번째 핵심 내용]
+- [두 번째 핵심 내용]
+- [세 번째 핵심 내용]
+
+SUMMARY_FULL:
+[2-3 문장으로 전체 내용 요약]
+
+TAGS:
+#태그1, #태그2, #태그3"""
+
+def get_gemini_analysis(text, api_key):
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
     
-    frontmatter = (
-        "---\n"
-        f"title: \"{title}\"\n"
-        f"source: \"{source}\"\n"
-        f"converted: \"{today_str}\"\n"
-        "tags:\n"
-        f"  - {tag}\n"
-        "---\n"
+    truncated_text = text[:30000]
+    
+    payload = {
+        "systemInstruction": {
+            "parts": [{"text": SYSTEM_PROMPT}]
+        },
+        "contents": [
+            {
+                "role": "user",
+                "parts": [{"text": "다음 설교문/묵상을 분석해주세요:\n\n" + truncated_text}]
+            }
+        ],
+        "generationConfig": {
+            "maxOutputTokens": 2048,
+            "temperature": 0.4
+        }
+    }
+    
+    data = json.dumps(payload).encode('utf-8')
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={
+            'Content-Type': 'application/json'
+        }
     )
     
+    try:
+        import ssl
+        ctx = ssl._create_unverified_context()
+        with urllib.request.urlopen(req, timeout=45, context=ctx) as response:
+            res_data = json.loads(response.read().decode('utf-8'))
+            candidates = res_data.get('candidates', [])
+            if not candidates:
+                raise ValueError("No candidates returned from Gemini API")
+            
+            parts = candidates[0].get('content', {}).get('parts', [])
+            text_out = "".join([p.get('text', '') for p in parts]).strip()
+            if not text_out:
+                raise ValueError("Empty response text from Gemini candidates")
+            return text_out
+    except Exception as e:
+        raise RuntimeError(f"Gemini API 호출 에러: {str(e)}")
+
+def parse_gemini_response(response_text):
+    result = {
+        "title": "",
+        "bible_text": "",
+        "theme": "",
+        "keywords": "",
+        "threePoint": "",
+        "summary": "",
+        "tags": []
+    }
+    
+    def safe_str(s):
+        return s.strip() if s else ""
+        
+    title_match = re.search(r'TITLE:\s*(.+)', response_text)
+    bible_match = re.search(r'BIBLE:\s*(.+)', response_text)
+    theme_match = re.search(r'THEME:\s*(.+)', response_text)
+    keywords_match = re.search(r'KEYWORDS:\s*(.+)', response_text)
+    
+    if title_match: result["title"] = safe_str(title_match.group(1))
+    if bible_match: result["bible_text"] = safe_str(bible_match.group(1))
+    if theme_match: result["theme"] = safe_str(theme_match.group(1))
+    if keywords_match: result["keywords"] = safe_str(keywords_match.group(1))
+    
+    three_match = re.search(r'SUMMARY_THREE:\s*\n?((?:- .+\n?)+)', response_text)
+    if three_match: result["threePoint"] = safe_str(three_match.group(1))
+    
+    summary_match = re.search(r'SUMMARY_FULL:\s*\n?([\s\S]+?)(?=\nTAGS:|$)', response_text)
+    if summary_match: result["summary"] = safe_str(summary_match.group(1))
+    
+    tags_match = re.search(r'TAGS:\s*\n?(.+)', response_text)
+    if tags_match:
+        raw_tags = tags_match.group(1)
+        tags_list = []
+        for t in re.split(r'[,\s]+', raw_tags):
+            t_clean = t.replace("#", "").strip()
+            if t_clean:
+                tags_list.append(t_clean)
+        result["tags"] = tags_list[:5]
+        
+    return result
+
+def build_frontmatter(parsed):
+    def esc(s):
+        return s.replace('"', '\\"')
+        
+    fm = "---\n"
+    fm += f'title: "{esc(parsed.get("title") or "제목 없음")}"\n'
+    fm += f'bible_text: "{esc(parsed.get("bible_text") or "")}"\n'
+    fm += f'theme: "{esc(parsed.get("theme") or "")}"\n'
+    fm += f'keywords: "{esc(parsed.get("keywords") or "")}"\n'
+    
+    tags = parsed.get("tags") or []
+    if tags:
+        fm += "tags:\n"
+        for t in tags:
+            fm += f"  - {t}\n"
+    fm += "---\n\n"
+    return fm
+
+def build_callouts(parsed):
+    out = ""
+    three = parsed.get("threePoint") or ""
+    if three.strip():
+        out += "> [!note] 🔑 3가지 핵심 요약\n"
+        for line in three.splitlines():
+            if line.strip():
+                out += f"> {line.strip()}\n"
+        out += "\n"
+        
+    summary = parsed.get("summary") or ""
+    if summary.strip():
+        out += "> [!summary] 📖 전체 요약\n"
+        for line in summary.splitlines():
+            if line.strip():
+                out += f"> {line.strip()}\n"
+        out += "\n"
+        
+    return out
+
+def format_markdown(text, file_path, api_key=None):
     bible_books = (
         r"창|출|레|민|신|수|삿|룻|삼상|삼하|왕상|왕하|대상|대하|스|느|에|욥|시|잠|전|아|사|렘|애|겔|단|호|욜|암|옵|욘|미|나|하|습|학|슥|말|"
         r"마|막|눅|요|행|롬|고전|고후|갈|엡|빌|골|살전|살후|딤전|딤후|딛|몬|히|야|벧전|벧후|요일|요이|요삼|유|계"
     )
-    # Matches book abbreviations followed by numbers and 장/절/:
     bible_ref_regex = re.compile(rf'\b({bible_books})\s*\d+[장:절]')
     
     list_chars = '•·▶▷◆◇○●'
@@ -204,18 +336,15 @@ def format_markdown(text, file_path):
             processed_lines.append("")
             continue
             
-        # 1. List item rule
         list_match = list_regex.match(stripped)
         if list_match:
             processed_lines.append(f"- {list_match.group(1)}")
             continue
             
-        # 2. Bible reference rule
         if bible_ref_regex.search(stripped):
             processed_lines.append(f"> {stripped}")
             continue
             
-        # 3. Short lines heading rule (< 30 chars, not ending in ., ,, 다, 요, 니다)
         if (len(stripped) < 30 and
             not stripped.endswith('.') and
             not stripped.endswith(',') and
@@ -225,10 +354,8 @@ def format_markdown(text, file_path):
             processed_lines.append(f"## {stripped}")
             continue
             
-        # 4. Standard text
         processed_lines.append(stripped)
         
-    # Collapse consecutive blank lines
     final_lines = []
     prev_was_blank = False
     for line in processed_lines:
@@ -240,9 +367,38 @@ def format_markdown(text, file_path):
             final_lines.append(line)
             prev_was_blank = False
             
-    return frontmatter + "\n".join(final_lines)
+    markdown_body = "\n".join(final_lines)
+    
+    if api_key:
+        try:
+            response_text = get_gemini_analysis(markdown_body, api_key)
+            parsed = parse_gemini_response(response_text)
+            frontmatter = build_frontmatter(parsed)
+            callouts = build_callouts(parsed)
+            return frontmatter + callouts + markdown_body
+        except Exception as e:
+            log_error(file_path, f"Gemini 요약 생성 실패: {str(e)}")
+            # Fall back to standard frontmatter
+            pass
+            
+    today_str = datetime.date.today().isoformat()
+    title = file_path.stem
+    source = file_path.name
+    ext = file_path.suffix.lower()
+    tag = "pdf-converted" if ext == ".pdf" else "hwp-converted"
+    
+    frontmatter = (
+        "---\n"
+        f'title: "{title}"\n'
+        f'source: "{source}"\n'
+        f'converted: "{today_str}"\n'
+        "tags:\n"
+        f"  - {tag}\n"
+        "---\n\n"
+    )
+    return frontmatter + markdown_body
 
-def convert_file(file_path, dest_path, overwrite):
+def convert_file(file_path, dest_path, overwrite, api_key=None):
     filename = file_path.name
     if not overwrite and dest_path.exists():
         return filename, 'skip', 'skip'
@@ -259,9 +415,12 @@ def convert_file(file_path, dest_path, overwrite):
         if not text.strip():
             raise ValueError("No text content could be extracted")
         
-        markdown_content = format_markdown(text, file_path)
+        markdown_content = format_markdown(text, file_path, api_key)
         with open(dest_path, 'w', encoding='utf-8') as f:
             f.write(markdown_content)
+            
+        if api_key:
+            method += ' + Gemini'
         return filename, 'ok', method
     except Exception as e:
         log_error(file_path, str(e))
@@ -309,6 +468,7 @@ def convert():
     overwrite = data.get('overwrite', False)
     workers = int(data.get('workers', 4))
     recursive = data.get('recursive', False)
+    api_key = data.get('api_key', '').strip()
     
     if not input_folder or not vault_path:
         return jsonify({"error": "input_folder and vault_path are required"}), 400
@@ -356,7 +516,7 @@ def convert():
             for file_path in files_to_convert:
                 relative_path = file_path.relative_to(input_path)
                 dest_path = vault_path_resolved / relative_path.with_suffix('.md')
-                future = executor.submit(convert_file, file_path, dest_path, overwrite)
+                future = executor.submit(convert_file, file_path, dest_path, overwrite, api_key)
                 future_to_file[future] = file_path
                 
             for future in concurrent.futures.as_completed(future_to_file):
