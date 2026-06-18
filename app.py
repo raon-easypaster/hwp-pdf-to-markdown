@@ -169,6 +169,47 @@ def extract_pdf_text(pdf_path):
     except Exception as e:
         raise ValueError(f"PDF 텍스트 추출 중 오류가 발생했습니다: {str(e)}")
 
+BIBLE_MAP = {
+    "창": "창세기", "출": "출애굽기", "레": "레위기", "민": "민수기", "신": "신명기",
+    "수": "여호수아", "삿": "사사기", "룻": "룻기", "삼상": "사무엘상", "삼하": "사무엘하",
+    "왕상": "열왕기상", "왕하": "열왕기하", "대상": "역대기상", "대하": "역대기하",
+    "스": "에스라", "느": "느헤미야", "에": "에스더", "욥": "욥기", "시": "시편",
+    "잠": "잠언", "전": "전도서", "아": "아가", "사": "이사야", "렘": "예레미야",
+    "애": "예레미야애가", "겔": "에스겔", "단": "다니엘", "호": "호세아", "욜": "요엘",
+    "암": "아모스", "옵": "오바댜", "욘": "요나", "미": "미가", "나": "나훔",
+    "하": "하박국", "습": "스바냐", "학": "학개", "슥": "스가랴", "말": "말라기",
+    "마": "마태복음", "막": "마가복음", "눅": "누가복음", "요": "요한복음", "행": "사도행전",
+    "롬": "로마서", "고전": "고린도전서", "고후": "고린도후서", "갈": "갈라디아서",
+    "엡": "에베소서", "빌": "빌립보서", "골": "골로새서", "살전": "데살로니가전서",
+    "살후": "데살로니가후서", "딤전": "디모데전서", "딤후": "디모데후서", "딛": "디도서",
+    "몬": "빌레몬서", "히": "히브리서", "야": "야고보서", "벧전": "베드로전서",
+    "벧후": "베드로후서", "요일": "요한일서", "요이": "요한이서", "요삼": "요한삼서",
+    "유": "유다서", "계": "요한계시록"
+}
+
+def extract_bible_tag(bible_text, title="", body_text=""):
+    if bible_text:
+        sorted_keys = sorted(BIBLE_MAP.keys(), key=len, reverse=True)
+        sorted_vals = sorted(BIBLE_MAP.values(), key=len, reverse=True)
+        
+        for val in sorted_vals:
+            if val in bible_text:
+                return val
+        
+        for key in sorted_keys:
+            pattern = rf'(?:^|[\s\d:,-]){re.escape(key)}(?:$|[\s\d:,-])'
+            if re.search(pattern, bible_text):
+                return BIBLE_MAP[key]
+                
+    for text in [title, body_text]:
+        if not text:
+            continue
+        for val in sorted(BIBLE_MAP.values(), key=len, reverse=True):
+            if val in text:
+                return val
+                
+    return None
+
 SYSTEM_PROMPT = """당신은 목회자 설교문/성경 묵상 문서를 분석하는 전문가입니다. 
 한국 교회의 복음주의-성결 신학 전통을 이해하며, 웨슬리안 신학의 맥락에서 설교를 분석합니다.
 
@@ -188,7 +229,7 @@ SUMMARY_FULL:
 [2-3 문장으로 전체 내용 요약]
 
 TAGS:
-#태그1, #태그2, #태그3"""
+[설교문을 분석하여 도출한 신학적/주제별 핵심 태그 10개. 예: #태그1, #태그2, ..., #태그10 형태로 작성]"""
 
 def get_gemini_analysis(text, api_key):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
@@ -275,7 +316,7 @@ def parse_gemini_response(response_text):
             t_clean = t.replace("#", "").strip()
             if t_clean:
                 tags_list.append(t_clean)
-        result["tags"] = tags_list[:5]
+        result["tags"] = tags_list[:10]
         
     return result
 
@@ -373,6 +414,14 @@ def format_markdown(text, file_path, api_key=None):
         try:
             response_text = get_gemini_analysis(markdown_body, api_key)
             parsed = parse_gemini_response(response_text)
+            
+            # 성경책 이름 태그 추출 및 추가
+            bible_tag = extract_bible_tag(parsed.get("bible_text"), parsed.get("title"), markdown_body)
+            if bible_tag:
+                if bible_tag in parsed["tags"]:
+                    parsed["tags"].remove(bible_tag)
+                parsed["tags"].insert(0, bible_tag)
+                
             frontmatter = build_frontmatter(parsed)
             callouts = build_callouts(parsed)
             return frontmatter + callouts + markdown_body
