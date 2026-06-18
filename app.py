@@ -330,6 +330,27 @@ def build_frontmatter(parsed):
     fm += f'theme: "{esc(parsed.get("theme") or "")}"\n'
     fm += f'keywords: "{esc(parsed.get("keywords") or "")}"\n'
     
+    # 세 줄 요약 추가
+    three = parsed.get("threePoint") or ""
+    three_lines = []
+    if three.strip():
+        for line in three.splitlines():
+            cleaned_line = line.strip().lstrip('-').strip()
+            if cleaned_line:
+                three_lines.append(cleaned_line)
+    if three_lines:
+        fm += "summary_three:\n"
+        for line in three_lines:
+            fm += f'  - "{esc(line)}"\n'
+            
+    # 전체 요약 추가 (YAML literal block scalar 형식)
+    summary = parsed.get("summary") or ""
+    if summary.strip():
+        fm += "summary_full: |\n"
+        for line in summary.splitlines():
+            if line.strip():
+                fm += f"  {line.strip()}\n"
+                
     tags = parsed.get("tags") or []
     if tags:
         fm += "tags:\n"
