@@ -836,7 +836,7 @@ def convert_file(file_path, dest_path, overwrite, api_key=None, force_ocr=False)
     try:
         # Intelligent Text Cache Reuse
         reused_text = None
-        if overwrite and dest_path.exists() and not force_ocr:
+        if overwrite and dest_path.exists():
             try:
                 with open(dest_path, 'r', encoding='utf-8') as f:
                     existing_content = f.read()
