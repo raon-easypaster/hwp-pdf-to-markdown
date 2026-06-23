@@ -12,6 +12,15 @@ import olefile
 import pypdf
 import urllib.request
 
+import platform
+if platform.system() == "Darwin":
+    try:
+        import Vision
+        from Quartz import CGImageSourceCreateWithData, CGImageSourceCreateImageAtIndex
+        from Foundation import NSData
+    except ImportError:
+        pass
+
 app = Flask(__name__, static_folder='.', static_url_path='')
 
 # Find hwp5txt path in the same venv or fallback to PATH
@@ -159,9 +168,6 @@ def extract_hwp_text(hwp_path):
 
 def extract_pdf_text_ocr_vision(pdf_path, api_key=None):
     import fitz
-    import Vision
-    from Quartz import CGImageSourceCreateWithData, CGImageSourceCreateImageAtIndex
-    from Foundation import NSData
     import base64
     import urllib.request
     import json
