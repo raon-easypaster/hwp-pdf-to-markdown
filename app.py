@@ -326,6 +326,102 @@ def extract_pdf_text(pdf_path, api_key=None):
             
     return combined_text, method
 
+def merge_broken_lines(text):
+    bible_books = (
+        r"창|출|레|민|신|수|삿|룻|삼상|삼하|왕상|왕하|대상|대하|스|느|에|욥|시|잠|전|아|사|렘|애|겔|단|호|욜|암|옵|욘|미|나|하|습|학|슥|말|"
+        r"마|막|눅|요|행|롬|고전|고후|갈|엡|빌|골|살전|살후|딤전|딤후|딛|몬|히|야|벧전|벧후|요일|요이|요삼|유|계"
+    )
+    bible_ref_regex = re.compile(rf'\b({bible_books})\s*\d+[장:절]')
+    
+    def join_two_lines(line1, line2):
+        if not line1:
+            return line2
+        if not line2:
+            return line1
+        last_char = line1[-1]
+        first_char = line2[0]
+        
+        josa_list = ('은', '는', '이', '가', '을', '를', '에', '의', '와', '과', '로', '도', '만', '며', '고', '서', '나', '든', '라', '요', '서', '야', '지')
+        josa_words = ('으로', '에서', '에게', '하며', '하고', '하여', '했다', '한다', '이다', '이라')
+        
+        def is_korean(char):
+            return '\uac00' <= char <= '\ud7a3'
+            
+        if is_korean(last_char) and is_korean(first_char):
+            is_josa = first_char in josa_list or any(line2.startswith(w) for w in josa_words)
+            if is_josa:
+                return line1 + line2
+            else:
+                return line1 + " " + line2
+        return line1 + " " + line2
+
+    def merge_paragraph(lines_list):
+        if not lines_list:
+            return ""
+        res = lines_list[0]
+        for line in lines_list[1:]:
+            res = join_two_lines(res, line)
+        return res
+
+    lines = text.splitlines()
+    merged_lines = []
+    title_prefixes = ('chapter', 'part', '제 ', '제', '장', '절', '부록', '서론', '결론', '목차', 'content', 'index')
+    current_paragraph = []
+    
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            if current_paragraph:
+                merged_lines.append(merge_paragraph(current_paragraph))
+                current_paragraph = []
+            merged_lines.append("")
+            continue
+            
+        is_list = stripped.startswith(('-', '*', '•', '·', '▶', '▷', '◆', '◇', '○', '●')) or \
+                  re.match(r'^\d+\.', stripped)
+        is_instruction = stripped.startswith(('(', '[', '{', '<'))
+        is_title_prefix = any(stripped.lower().startswith(p) for p in title_prefixes)
+        is_bible_ref = bool(bible_ref_regex.search(stripped))
+        
+        if is_list or is_instruction or is_title_prefix or is_bible_ref:
+            if current_paragraph:
+                merged_lines.append(merge_paragraph(current_paragraph))
+                current_paragraph = []
+            current_paragraph.append(stripped)
+            if is_list or is_title_prefix or is_bible_ref:
+                merged_lines.append(current_paragraph[0])
+                current_paragraph = []
+            continue
+            
+        if current_paragraph:
+            prev_line = current_paragraph[-1]
+            is_sentence_end = prev_line.endswith(('.', '?', '!', '"', "'", ')', '}', ']')) or \
+                               prev_line.endswith(('다', '요', '오', '죠', '냐', '디', '음', '임', '기', '코'))
+            
+            if is_sentence_end:
+                merged_lines.append(merge_paragraph(current_paragraph))
+                current_paragraph = [stripped]
+            else:
+                current_paragraph.append(stripped)
+        else:
+            current_paragraph.append(stripped)
+            
+    if current_paragraph:
+        merged_lines.append(merge_paragraph(current_paragraph))
+        
+    final_output = []
+    prev_was_blank = False
+    for line in merged_lines:
+        if not line:
+            if not prev_was_blank:
+                final_output.append("")
+                prev_was_blank = True
+        else:
+            final_output.append(line)
+            prev_was_blank = False
+            
+    return "\n".join(final_output)
+
 BIBLE_MAP = {
     "창": "창세기", "출": "출애굽기", "레": "레위기", "민": "민수기", "신": "신명기",
     "수": "여호수아", "삿": "사사기", "룻": "룻기", "삼상": "사무엘상", "삼하": "사무엘하",
@@ -546,8 +642,11 @@ def format_markdown(text, file_path, api_key=None):
     list_chars = '•·▶▷◆◇○●'
     list_regex = re.compile(rf'^[{re.escape(list_chars)}]\s*(.*)')
     
+    # 문장 병합 수행 (줄바꿈 결합)
+    merged_text = merge_broken_lines(text)
+    
     processed_lines = []
-    lines = text.splitlines()
+    lines = merged_text.splitlines()
     
     for line in lines:
         stripped = line.strip()
@@ -564,12 +663,10 @@ def format_markdown(text, file_path, api_key=None):
             processed_lines.append(f"> {stripped}")
             continue
             
+        # 헤더 자동 감지 (오탐 방지 강화)
         if (len(stripped) < 30 and
-            not stripped.endswith('.') and
-            not stripped.endswith(',') and
-            not stripped.endswith('다') and
-            not stripped.endswith('요') and
-            not stripped.endswith('니다')):
+            not stripped.startswith(('(', '[', '{', '<', '>', '-')) and
+            not stripped.endswith(('.', ',', '다', '요', '오', '죠', '냐', '디', '음', '임', '기', '코', ')', '}', ']', '>', '-'))):
             processed_lines.append(f"## {stripped}")
             continue
             
