@@ -790,6 +790,39 @@ def build_callouts(parsed):
         
     return out
 
+def extract_local_tags(text, bible_tag=None):
+    candidates = [
+        "예배", "예식", "성찬", "기도", "성결", "믿음", "사랑", "소망", "은혜", 
+        "예수", "그리스도", "하나님", "성령", "교회", "목회", "신앙", "구원", 
+        "십자가", "부활", "세례", "장례", "가정", "축복", "찬송", "성경", 
+        "말씀", "진리", "전통", "선교", "헌신", "예전", "감사", "생명", "하늘", 
+        "평화", "기쁨", "증언", "고백", "임재", "축도", "결혼", "추모", "안수",
+        "중생", "신유", "재림", "사중복음", "웨슬리", "복음", "치유"
+    ]
+    counts = {}
+    for word in candidates:
+        count = text.count(word)
+        if count > 0:
+            counts[word] = count
+            
+    sorted_words = sorted(counts.keys(), key=lambda w: counts[w], reverse=True)
+    
+    tags = []
+    if bible_tag and bible_tag not in tags:
+        tags.append(bible_tag)
+        
+    for w in sorted_words:
+        if w not in tags:
+            tags.append(w)
+        if len(tags) >= 10:
+            break
+            
+    fallback_pool = [c for c in candidates if c not in tags]
+    while len(tags) < 10 and fallback_pool:
+        tags.append(fallback_pool.pop(0))
+        
+    return tags[:10]
+
 def format_markdown(text, file_path, api_key=None):
     bible_books = (
         r"창|출|레|민|신|수|삿|룻|삼상|삼하|왕상|왕하|대상|대하|스|느|에|욥|시|잠|전|아|사|렘|애|겔|단|호|욜|암|옵|욘|미|나|하|습|학|슥|말|"
@@ -885,21 +918,24 @@ def format_markdown(text, file_path, api_key=None):
                 short_err = "네트워크 오류"
             gemini_status = f"실패 ({short_err})"
             
+    bible_tag = extract_bible_tag(None, file_path.stem, markdown_body)
+    local_tags = extract_local_tags(markdown_body, bible_tag)
+    
     today_str = datetime.date.today().isoformat()
     title = file_path.stem
     source = file_path.name
-    ext = file_path.suffix.lower()
-    tag = "pdf-converted" if ext == ".pdf" else "hwp-converted"
     
-    frontmatter = (
-        "---\n"
-        f'title: "{title}"\n'
-        f'source: "{source}"\n'
-        f'converted: "{today_str}"\n'
-        "tags:\n"
-        f"  - {tag}\n"
-        "---\n\n"
-    )
+    frontmatter = "---\n"
+    frontmatter += f'title: "{title}"\n'
+    frontmatter += f'source: "{source}"\n'
+    frontmatter += f'converted: "{today_str}"\n'
+    if bible_tag:
+        frontmatter += f'bible_text: "{bible_tag}"\n'
+    frontmatter += "tags:\n"
+    for t in local_tags:
+        frontmatter += f"  - {t}\n"
+    frontmatter += "---\n\n"
+    
     return frontmatter + markdown_body, gemini_status
 
 def convert_file(file_path, dest_path, overwrite, api_key=None, force_ocr=False, progress_callback=None):
