@@ -274,6 +274,35 @@ def extract_pdf_text_ocr_gemini(pdf_path, api_key):
     print(f"[OCR-Gemini] Completed Gemini OCR for {pdf_path}.", file=sys.stderr)
     return "\n\n".join(text_parts)
 
+def is_corrupted_korean(text):
+    if not text:
+        return True
+        
+    # 1. PUA (Private Use Area) chars - common in corrupted font mapping conversion
+    pua_chars = len(re.findall(r'[\ue000-\uf8ff]', text))
+    
+    # 2. Typical gibberish/corrupted letters generated during PDF font decode
+    corrupt_signals = len(re.findall(r'[☜☞☎巒藕靂欠]', text))
+    
+    # 3. Unicode replacement characters (question marks)
+    replacement_chars = len(re.findall(r'\uFFFD', text))
+    
+    # 4. Korean words containing weird inline English letters or punctuation
+    # (e.g. "최 足오- 혀(오☜")
+    weird_patterns = len(re.findall(r'[가-힣][^가-힣\s]{1,5}[가-힣]', text))
+    
+    text_len = len(text)
+    weird_density = (weird_patterns / text_len) if text_len > 0 else 0
+    
+    if pua_chars > 0 or corrupt_signals > 0 or replacement_chars > 0 or (weird_patterns > 5 and weird_density > 0.005):
+        print(f"[Corrupt-Detection] Length={text_len}, PUA={pua_chars}, CorruptSignals={corrupt_signals}, ReplacementChars={replacement_chars}, WeirdKoreanPatterns={weird_patterns} (density={weird_density:.4f})", file=sys.stderr)
+        
+    # Switch to OCR if PUA chars, corrupt symbols, replacement chars are present,
+    # or if the density of weird patterns is high (over 1.5%) and happens at least 15 times.
+    if pua_chars > 3 or corrupt_signals > 2 or replacement_chars > 3 or (weird_patterns > 15 and weird_density > 0.015):
+        return True
+    return False
+
 def extract_pdf_text(pdf_path, api_key=None, force_ocr=False):
     combined_text = ""
     method = 'failed'
@@ -293,8 +322,14 @@ def extract_pdf_text(pdf_path, api_key=None, force_ocr=False):
             method = 'failed'
             print(f"pypdf extraction failed: {e}", file=sys.stderr)
         
-    if force_ocr or len(combined_text.strip()) < 100:
-        print(f"Running OCR for {pdf_path} (force_ocr={force_ocr}, text_len={len(combined_text)})...", file=sys.stderr)
+    is_corrupt = False
+    if not force_ocr and combined_text.strip():
+        is_corrupt = is_corrupted_korean(combined_text)
+        if is_corrupt:
+            print(f"Detected corrupted/gibberish text in {pdf_path} (length={len(combined_text)}). Switching to OCR automatically...", file=sys.stderr)
+            
+    if force_ocr or is_corrupt or len(combined_text.strip()) < 100:
+        print(f"Running OCR for {pdf_path} (force_ocr={force_ocr}, is_corrupt={is_corrupt}, text_len={len(combined_text)})...", file=sys.stderr)
         
         import platform
         is_mac = platform.system() == "Darwin"
@@ -549,17 +584,21 @@ def parse_gemini_response(response_text):
     def safe_str(s):
         return s.strip() if s else ""
         
-    title_match = re.search(r'TITLE:\s*(.+)', response_text)
-    bible_match = re.search(r'BIBLE:\s*(.+)', response_text)
-    theme_match = re.search(r'THEME:\s*(.+)', response_text)
-    keywords_match = re.search(r'KEYWORDS:\s*(.+)', response_text)
+    title_match = re.search(r'(?:TITLE|Title|제목)\s*:\s*(.+)', response_text, re.IGNORECASE)
+    bible_match = re.search(r'(?:BIBLE|Bible|성경|본문)\s*:\s*(.+)', response_text, re.IGNORECASE)
+    theme_match = re.search(r'(?:THEME|Theme|주제)\s*:\s*(.+)', response_text, re.IGNORECASE)
+    keywords_match = re.search(r'(?:KEYWORDS|Keywords|핵심어|키워드)\s*:\s*(.+)', response_text, re.IGNORECASE)
     
     if title_match: result["title"] = safe_str(title_match.group(1))
     if bible_match: result["bible_text"] = safe_str(bible_match.group(1))
     if theme_match: result["theme"] = safe_str(theme_match.group(1))
     if keywords_match: result["keywords"] = safe_str(keywords_match.group(1))
     
-    three_match = re.search(r'SUMMARY_THREE:\s*\n?([\s\S]+?)(?=\nSUMMARY_FULL:|$)', response_text)
+    three_match = re.search(
+        r'(?:SUMMARY_THREE|Summary_Three|세줄요약|3가지 핵심 요약)\s*:\s*\n?([\s\S]+?)(?=\n(?:SUMMARY_FULL|Summary_Full|전체요약|요약|TAGS|Tags|태그):|$)',
+        response_text,
+        re.IGNORECASE
+    )
     if three_match:
         raw_three = safe_str(three_match.group(1))
         formatted_lines = []
@@ -569,17 +608,35 @@ def parse_gemini_response(response_text):
                 formatted_lines.append(f"- {line_str}")
         result["threePoint"] = "\n".join(formatted_lines)
         
-    summary_match = re.search(r'SUMMARY_FULL:\s*\n?([\s\S]+?)(?=\nTAGS:|$|\nTags:)', response_text)
-    if summary_match: result["summary"] = safe_str(summary_match.group(1))
+    summary_match = re.search(
+        r'(?:SUMMARY_FULL|Summary_Full|전체요약|요약)\s*:\s*\n?([\s\S]+?)(?=\n(?:TAGS|Tags|태그|핵심\s*태그):|$)',
+        response_text,
+        re.IGNORECASE
+    )
+    if summary_match: 
+        result["summary"] = safe_str(summary_match.group(1))
     
-    tags_match = re.search(r'TAGS:\s*\n?([\s\S]+)', response_text)
+    tags_match = re.search(
+        r'(?:TAGS|Tags|태그|핵심\s*태그)\s*:\s*\n?([\s\S]+)',
+        response_text,
+        re.IGNORECASE
+    )
     if tags_match:
-        raw_tags = tags_match.group(1)
+        raw_tags = safe_str(tags_match.group(1))
         tags_list = []
-        for t in re.split(r'[,\s\n]+', raw_tags):
-            t_clean = t.replace("#", "").strip()
-            if t_clean:
-                tags_list.append(t_clean)
+        
+        # Method 1: Find all terms starting with #
+        hash_tags = re.findall(r'#([가-힣a-zA-Z0-9_]+)', raw_tags)
+        if hash_tags:
+            tags_list = [t.strip() for t in hash_tags if t.strip()]
+            
+        # Method 2: Fallback to comma/whitespace/hyphen splits
+        if not tags_list:
+            for t in re.split(r'[,\s\n\-\*•·]+', raw_tags):
+                t_clean = t.replace("#", "").strip()
+                if t_clean and not t_clean.startswith('`') and len(t_clean) > 1:
+                    tags_list.append(t_clean)
+                    
         result["tags"] = tags_list[:10]
         
     return result
@@ -703,13 +760,19 @@ def format_markdown(text, file_path, api_key=None):
             
             # 성경책 이름 태그 추출 및 추가
             bible_tag = extract_bible_tag(parsed.get("bible_text"), parsed.get("title"), markdown_body)
+            
+            unique_tags = []
+            for t in parsed.get("tags") or []:
+                if t not in unique_tags:
+                    unique_tags.append(t)
+                    
             if bible_tag:
-                if bible_tag in parsed["tags"]:
-                    parsed["tags"].remove(bible_tag)
-                parsed["tags"].insert(0, bible_tag)
+                if bible_tag in unique_tags:
+                    unique_tags.remove(bible_tag)
+                unique_tags.insert(0, bible_tag)
             
             # 최종 태그 리스트를 정확히 10개로 제한
-            parsed["tags"] = parsed["tags"][:10]
+            parsed["tags"] = unique_tags[:10]
                 
             frontmatter = build_frontmatter(parsed)
             callouts = build_callouts(parsed)

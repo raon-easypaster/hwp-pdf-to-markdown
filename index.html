@@ -388,8 +388,8 @@
         <div class="form-group">
             <label for="overwriteMode">기존 동일한 마크다운 파일 존재 시 처리 방식</label>
             <select id="overwriteMode" class="input-text" style="background-color: var(--surface);">
-                <option value="skip">변환하지 않고 건너뛰기 (기본값)</option>
-                <option value="overwrite">덮어쓰고 다시 변환하기</option>
+                <option value="overwrite">덮어쓰고 다시 변환하기 (기본값)</option>
+                <option value="skip">변환하지 않고 건너뛰기</option>
             </select>
         </div>
 
@@ -484,6 +484,8 @@
         }
         if (localStorage.getItem('overwriteMode')) {
             document.getElementById('overwriteMode').value = localStorage.getItem('overwriteMode');
+        } else {
+            document.getElementById('overwriteMode').value = 'overwrite';
         }
         if (localStorage.getItem('forceOcr') === 'true') {
             document.getElementById('forceOcr').checked = true;
