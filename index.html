@@ -688,7 +688,11 @@
 
                             const lineDiv = document.createElement('div');
                             lineDiv.className = `log-line ${statusClass}`;
-                            lineDiv.textContent = `${icon} ${data.file} → ${data.method}`;
+                            if (data.status === 'skip') {
+                                lineDiv.textContent = `${icon} ${data.file} → 건너뜀 (이미 파일이 존재함)`;
+                            } else {
+                                lineDiv.textContent = `${icon} ${data.file} → ${data.method}`;
+                            }
                             logFeed.appendChild(lineDiv);
                             logFeed.scrollTop = logFeed.scrollHeight;
 

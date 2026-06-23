@@ -559,17 +559,24 @@ def parse_gemini_response(response_text):
     if theme_match: result["theme"] = safe_str(theme_match.group(1))
     if keywords_match: result["keywords"] = safe_str(keywords_match.group(1))
     
-    three_match = re.search(r'SUMMARY_THREE:\s*\n?((?:- .+\n?)+)', response_text)
-    if three_match: result["threePoint"] = safe_str(three_match.group(1))
-    
-    summary_match = re.search(r'SUMMARY_FULL:\s*\n?([\s\S]+?)(?=\nTAGS:|$)', response_text)
+    three_match = re.search(r'SUMMARY_THREE:\s*\n?([\s\S]+?)(?=\nSUMMARY_FULL:|$)', response_text)
+    if three_match:
+        raw_three = safe_str(three_match.group(1))
+        formatted_lines = []
+        for line in raw_three.splitlines():
+            line_str = line.strip().lstrip('-').lstrip('*').strip()
+            if line_str:
+                formatted_lines.append(f"- {line_str}")
+        result["threePoint"] = "\n".join(formatted_lines)
+        
+    summary_match = re.search(r'SUMMARY_FULL:\s*\n?([\s\S]+?)(?=\nTAGS:|$|\nTags:)', response_text)
     if summary_match: result["summary"] = safe_str(summary_match.group(1))
     
-    tags_match = re.search(r'TAGS:\s*\n?(.+)', response_text)
+    tags_match = re.search(r'TAGS:\s*\n?([\s\S]+)', response_text)
     if tags_match:
         raw_tags = tags_match.group(1)
         tags_list = []
-        for t in re.split(r'[,\s]+', raw_tags):
+        for t in re.split(r'[,\s\n]+', raw_tags):
             t_clean = t.replace("#", "").strip()
             if t_clean:
                 tags_list.append(t_clean)
