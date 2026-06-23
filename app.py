@@ -696,6 +696,9 @@ def format_markdown(text, file_path, api_key=None):
                 if bible_tag in parsed["tags"]:
                     parsed["tags"].remove(bible_tag)
                 parsed["tags"].insert(0, bible_tag)
+            
+            # 최종 태그 리스트를 정확히 10개로 제한
+            parsed["tags"] = parsed["tags"][:10]
                 
             frontmatter = build_frontmatter(parsed)
             callouts = build_callouts(parsed)
