@@ -505,23 +505,23 @@ def extract_bible_tag(bible_text, title="", body_text=""):
 SYSTEM_PROMPT = """당신은 목회자 설교문/성경 묵상 문서를 분석하는 전문가입니다. 
 한국 교회의 복음주의-성결 신학 전통을 이해하며, 웨슬리안 신학의 맥락에서 설교를 분석합니다.
 
-반드시 다음 형식으로 정확히 출력하세요:
+반드시 다음 형식으로 정확히 출력하세요 (특히 TAGS 세션은 성경 본문 태그를 제외하고 설교 주제와 관련된 핵심 단어 10개를 샵(#)을 붙여서 쉼표로 구분해 반드시 작성해야 합니다):
 
-TITLE: [설교 제목]
-BIBLE: [성경 구절]
-THEME: [주제]
-KEYWORDS: [키워드들]
+TITLE: 설교 제목
+BIBLE: 성경 구절 (예: 로마서 8:28)
+THEME: 설교의 핵심 주제
+KEYWORDS: 키워드1, 키워드2, 키워드3
 
 SUMMARY_THREE:
-- [첫 번째 핵심 내용]
-- [두 번째 핵심 내용]
-- [세 번째 핵심 내용]
+- 첫 번째 핵심 내용
+- 두 번째 핵심 내용
+- 세 번째 핵심 내용
 
 SUMMARY_FULL:
-[2-3 문장으로 전체 내용 요약]
+2-3 문장으로 전체 내용 요약
 
 TAGS:
-[설교문을 분석하여 도출한 신학적/주제별 핵심 태그 10개. 예: #태그1, #태그2, ..., #태그10 형태로 작성]"""
+#태그1, #태그2, #태그3, #태그4, #태그5, #태그6, #태그7, #태그8, #태그9, #태그10"""
 
 def get_gemini_analysis(text, api_key):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
@@ -756,6 +756,11 @@ def format_markdown(text, file_path, api_key=None):
     if api_key:
         try:
             response_text = get_gemini_analysis(markdown_body, api_key)
+            try:
+                with open(Path(__file__).parent / 'gemini_response_debug.txt', 'w', encoding='utf-8') as f:
+                    f.write(response_text)
+            except Exception:
+                pass
             parsed = parse_gemini_response(response_text)
             
             # 성경책 이름 태그 추출 및 추가
