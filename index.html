@@ -671,7 +671,26 @@
                             initLine.textContent = `🚀 변환 시작 (총 ${total}개 파일)...`;
                             logFeed.appendChild(initLine);
                         }
+                        else if (data.type === 'page_progress') {
+                             const safeId = 'prog-' + data.file.replace(/[^a-zA-Z0-9]/g, '_');
+                             let lineDiv = document.getElementById(safeId);
+                             if (!lineDiv) {
+                                 lineDiv = document.createElement('div');
+                                 lineDiv.id = safeId;
+                                 lineDiv.className = 'log-line';
+                                 lineDiv.style.color = '#90CAF9'; // Soft blue
+                                 logFeed.appendChild(lineDiv);
+                             }
+                             lineDiv.textContent = `⏳ ${data.file} → OCR 진행 중... (${data.page}/${data.total} 페이지 완료)`;
+                             logFeed.scrollTop = logFeed.scrollHeight;
+                        }
                         else if (data.type === 'progress') {
+                            const safeId = 'prog-' + data.file.replace(/[^a-zA-Z0-9]/g, '_');
+                            const pageProgDiv = document.getElementById(safeId);
+                            if (pageProgDiv) {
+                                pageProgDiv.remove();
+                            }
+
                             processed++;
                             let icon = '❓';
                             let statusClass = '';

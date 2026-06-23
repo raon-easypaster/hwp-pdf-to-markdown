@@ -166,7 +166,7 @@ def extract_hwp_text(hwp_path):
         
     raise ValueError("All HWP extraction stages failed or returned empty text.")
 
-def extract_pdf_text_ocr_vision(pdf_path, api_key=None):
+def extract_pdf_text_ocr_vision(pdf_path, api_key=None, progress_callback=None):
     import fitz
     import base64
     import urllib.request
@@ -256,13 +256,19 @@ def extract_pdf_text_ocr_vision(pdf_path, api_key=None):
             except Exception as gemini_page_e:
                 print(f"[OCR] Gemini OCR fallback failed on page {i+1}: {gemini_page_e}", file=sys.stderr)
                 
+        if progress_callback:
+            try:
+                progress_callback(i + 1, len(doc))
+            except Exception:
+                pass
+                
         if page_text:
             text_parts.append(page_text)
             
     print(f"[OCR] Completed OCR for {pdf_path}.", file=sys.stderr)
     return "\n\n".join(text_parts)
 
-def extract_pdf_text_ocr_gemini(pdf_path, api_key):
+def extract_pdf_text_ocr_gemini(pdf_path, api_key, progress_callback=None):
     import fitz
     import urllib.request
     import json
@@ -325,7 +331,12 @@ def extract_pdf_text_ocr_gemini(pdf_path, api_key):
                         text_parts.append(text_out)
         except Exception as e:
             print(f"[OCR-Gemini] Error on page {i+1}: {e}", file=sys.stderr)
-            continue
+            
+        if progress_callback:
+            try:
+                progress_callback(i + 1, len(doc))
+            except Exception:
+                pass
             
     print(f"[OCR-Gemini] Completed Gemini OCR for {pdf_path}.", file=sys.stderr)
     return "\n\n".join(text_parts)
@@ -382,7 +393,7 @@ def is_corrupted_korean(text):
         return True
     return False
 
-def extract_pdf_text(pdf_path, api_key=None, force_ocr=False):
+def extract_pdf_text(pdf_path, api_key=None, force_ocr=False, progress_callback=None):
     combined_text = ""
     method = 'failed'
     
@@ -415,7 +426,7 @@ def extract_pdf_text(pdf_path, api_key=None, force_ocr=False):
         
         if is_mac:
             try:
-                ocr_text = extract_pdf_text_ocr_vision(pdf_path, api_key)
+                ocr_text = extract_pdf_text_ocr_vision(pdf_path, api_key, progress_callback)
                 if ocr_text.strip():
                     return ocr_text, 'Vision OCR'
             except Exception as ocr_e:
@@ -424,7 +435,7 @@ def extract_pdf_text(pdf_path, api_key=None, force_ocr=False):
                 
         if api_key:
             try:
-                ocr_text = extract_pdf_text_ocr_gemini(pdf_path, api_key)
+                ocr_text = extract_pdf_text_ocr_gemini(pdf_path, api_key, progress_callback)
                 if ocr_text.strip():
                     return ocr_text, 'Gemini OCR'
             except Exception as gemini_e:
@@ -832,6 +843,7 @@ def format_markdown(text, file_path, api_key=None):
             
     markdown_body = "\n".join(final_lines)
     
+    gemini_status = None
     if api_key:
         try:
             response_text = get_gemini_analysis(markdown_body, api_key)
@@ -860,11 +872,18 @@ def format_markdown(text, file_path, api_key=None):
                 
             frontmatter = build_frontmatter(parsed)
             callouts = build_callouts(parsed)
-            return frontmatter + callouts + markdown_body
+            return frontmatter + callouts + markdown_body, "success"
         except Exception as e:
-            log_error(file_path, f"Gemini 요약 생성 실패: {str(e)}")
-            # Fall back to standard frontmatter
-            pass
+            err_msg = str(e)
+            log_error(file_path, f"Gemini 요약 생성 실패: {err_msg}")
+            short_err = "API 오류"
+            if "403" in err_msg:
+                short_err = "API 키 오류 (403)"
+            elif "400" in err_msg:
+                short_err = "API 요청 오류 (400)"
+            elif "Connection" in err_msg or "timeout" in err_msg.lower():
+                short_err = "네트워크 오류"
+            gemini_status = f"실패 ({short_err})"
             
     today_str = datetime.date.today().isoformat()
     title = file_path.stem
@@ -881,25 +900,37 @@ def format_markdown(text, file_path, api_key=None):
         f"  - {tag}\n"
         "---\n\n"
     )
-    return frontmatter + markdown_body
+    return frontmatter + markdown_body, gemini_status
 
-def convert_file(file_path, dest_path, overwrite, api_key=None, force_ocr=False):
+def convert_file(file_path, dest_path, overwrite, api_key=None, force_ocr=False, progress_callback=None):
     filename = file_path.name
     if not overwrite and dest_path.exists():
         return filename, 'skip', 'skip'
         
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        # Intelligent Text Cache Reuse
+        # Intelligent Text Cache Reuse (with NFC/NFD encoding robustness for macOS)
         reused_text = None
-        if overwrite and dest_path.exists():
+        
+        import unicodedata
+        dest_str = str(dest_path)
+        possible_paths = [dest_path, Path(unicodedata.normalize('NFC', dest_str)), Path(unicodedata.normalize('NFD', dest_str))]
+        
+        existing_path = None
+        for p in possible_paths:
+            if p.exists():
+                existing_path = p
+                break
+                
+        if overwrite and existing_path:
             try:
-                with open(dest_path, 'r', encoding='utf-8') as f:
+                with open(existing_path, 'r', encoding='utf-8') as f:
                     existing_content = f.read()
                 
                 body_text = clean_frontmatter_and_callouts(existing_content)
                 if body_text.strip() and len(body_text) > 100 and not is_corrupted_korean(body_text):
                     reused_text = body_text
+                    dest_path = existing_path # Write back to the same physical file encoding
                     print(f"Reusing clean extracted text from existing markdown for {filename} to refresh Gemini metadata...", file=sys.stderr)
             except Exception as reuse_e:
                 print(f"Failed to reuse existing text for {filename}: {reuse_e}", file=sys.stderr)
@@ -910,19 +941,24 @@ def convert_file(file_path, dest_path, overwrite, api_key=None, force_ocr=False)
         else:
             ext = file_path.suffix.lower()
             if ext == '.pdf':
-                text, method = extract_pdf_text(file_path, api_key, force_ocr)
+                text, method = extract_pdf_text(file_path, api_key, force_ocr, progress_callback)
             else:
                 text, method = extract_hwp_text(file_path)
             
         if not text.strip():
             raise ValueError("No text content could be extracted")
         
-        markdown_content = format_markdown(text, file_path, api_key)
+        markdown_content, gemini_status = format_markdown(text, file_path, api_key)
         with open(dest_path, 'w', encoding='utf-8') as f:
             f.write(markdown_content)
             
         if api_key:
-            method += ' + Gemini'
+            if gemini_status == "success":
+                method += ' + Gemini 요약'
+            elif gemini_status:
+                method += f' ({gemini_status})'
+            else:
+                method += ' + Gemini'
         return filename, 'ok', method
     except Exception as e:
         log_error(file_path, str(e))
@@ -1003,6 +1039,7 @@ def convert():
                 
     total_files = len(files_to_convert)
     
+    import queue
     def generate():
         ok_count = 0
         fail_count = 0
@@ -1014,37 +1051,74 @@ def convert():
             yield json.dumps({"type": "done", "total": 0, "ok": 0, "fail": 0, "skip": 0}, ensure_ascii=False) + "\n"
             return
             
-        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-            future_to_file = {}
-            for file_path in files_to_convert:
-                relative_path = file_path.relative_to(input_path)
-                dest_path = vault_path_resolved / relative_path.with_suffix('.md')
-                future = executor.submit(convert_file, file_path, dest_path, overwrite, api_key, force_ocr)
-                future_to_file[future] = file_path
+        progress_queue = queue.Queue()
+        
+        def worker_wrapper(file_path, dest_path, overwrite, api_key, force_ocr):
+            filename = file_path.name
+            relative_file_path = str(file_path.relative_to(input_path))
+            
+            def page_callback(page_num, total_pages):
+                progress_queue.put({
+                    "type": "page_progress",
+                    "file": relative_file_path,
+                    "page": page_num,
+                    "total": total_pages
+                })
                 
-            for future in concurrent.futures.as_completed(future_to_file):
-                file_path = future_to_file[future]
-                relative_file_path = str(file_path.relative_to(input_path))
-                try:
-                    filename, status, method = future.result()
-                except Exception as e:
-                    status = 'fail'
-                    method = '실패'
-                    log_error(file_path, f"Thread execution error: {str(e)}")
-                    
-                if status == 'ok':
-                    ok_count += 1
-                elif status == 'skip':
-                    skip_count += 1
-                else:
-                    fail_count += 1
-                    
-                yield json.dumps({
-                    "type": "progress",
+            try:
+                filename, status, method = convert_file(file_path, dest_path, overwrite, api_key, force_ocr, page_callback)
+                progress_queue.put({
+                    "type": "file_done",
                     "file": relative_file_path,
                     "status": status,
                     "method": method
-                }, ensure_ascii=False) + "\n"
+                })
+            except Exception as e:
+                log_error(file_path, f"Thread error: {str(e)}")
+                progress_queue.put({
+                    "type": "file_done",
+                    "file": relative_file_path,
+                    "status": "fail",
+                    "method": "실패"
+                })
+                
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = []
+            for file_path in files_to_convert:
+                relative_path = file_path.relative_to(input_path)
+                dest_path = vault_path_resolved / relative_path.with_suffix('.md')
+                future = executor.submit(worker_wrapper, file_path, dest_path, overwrite, api_key, force_ocr)
+                futures.append(future)
+                
+            active_futures = len(futures)
+            while active_futures > 0 or not progress_queue.empty():
+                try:
+                    msg = progress_queue.get(timeout=0.2)
+                    if msg["type"] == "file_done":
+                        if msg["status"] == "ok":
+                            ok_count += 1
+                        elif msg["status"] == "skip":
+                            skip_count += 1
+                        else:
+                            fail_count += 1
+                            
+                        yield json.dumps({
+                            "type": "progress",
+                            "file": msg["file"],
+                            "status": msg["status"],
+                            "method": msg["method"]
+                        }, ensure_ascii=False) + "\n"
+                    elif msg["type"] == "page_progress":
+                        yield json.dumps({
+                            "type": "page_progress",
+                            "file": msg["file"],
+                            "page": msg["page"],
+                            "total": msg["total"]
+                        }, ensure_ascii=False) + "\n"
+                except queue.Empty:
+                    pass
+                
+                active_futures = sum(1 for f in futures if not f.done())
                 
         yield json.dumps({
             "type": "done",
