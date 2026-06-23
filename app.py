@@ -274,6 +274,29 @@ def extract_pdf_text_ocr_gemini(pdf_path, api_key):
     print(f"[OCR-Gemini] Completed Gemini OCR for {pdf_path}.", file=sys.stderr)
     return "\n\n".join(text_parts)
 
+def clean_frontmatter_and_callouts(content):
+    # 1) frontmatter 제거
+    cleaned = re.sub(r'^---\n[\s\S]*?\n---\n*', '', content)
+    
+    # 2) callout 제거 (> [!...)
+    lines = cleaned.splitlines()
+    body_lines = []
+    in_callout = False
+    
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith('>') and '[!' in stripped:
+            in_callout = True
+            continue
+        if in_callout:
+            if stripped.startswith('>'):
+                continue
+            else:
+                in_callout = False
+        body_lines.append(line)
+        
+    return "\n".join(body_lines).strip()
+
 def is_corrupted_korean(text):
     if not text:
         return True
@@ -811,11 +834,29 @@ def convert_file(file_path, dest_path, overwrite, api_key=None, force_ocr=False)
         
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        ext = file_path.suffix.lower()
-        if ext == '.pdf':
-            text, method = extract_pdf_text(file_path, api_key, force_ocr)
+        # Intelligent Text Cache Reuse
+        reused_text = None
+        if overwrite and dest_path.exists() and not force_ocr:
+            try:
+                with open(dest_path, 'r', encoding='utf-8') as f:
+                    existing_content = f.read()
+                
+                body_text = clean_frontmatter_and_callouts(existing_content)
+                if body_text.strip() and len(body_text) > 100 and not is_corrupted_korean(body_text):
+                    reused_text = body_text
+                    print(f"Reusing clean extracted text from existing markdown for {filename} to refresh Gemini metadata...", file=sys.stderr)
+            except Exception as reuse_e:
+                print(f"Failed to reuse existing text for {filename}: {reuse_e}", file=sys.stderr)
+
+        if reused_text:
+            text = reused_text
+            method = 'Cached Text'
         else:
-            text, method = extract_hwp_text(file_path)
+            ext = file_path.suffix.lower()
+            if ext == '.pdf':
+                text, method = extract_pdf_text(file_path, api_key, force_ocr)
+            else:
+                text, method = extract_hwp_text(file_path)
             
         if not text.strip():
             raise ValueError("No text content could be extracted")
