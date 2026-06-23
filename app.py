@@ -157,7 +157,124 @@ def extract_hwp_text(hwp_path):
         
     raise ValueError("All HWP extraction stages failed or returned empty text.")
 
-def extract_pdf_text(pdf_path):
+def extract_pdf_text_ocr_vision(pdf_path):
+    import fitz
+    import Vision
+    from Quartz import CGImageSourceCreateWithData, CGImageSourceCreateImageAtIndex
+    from Foundation import NSData
+    
+    doc = fitz.open(pdf_path)
+    text_parts = []
+    print(f"[OCR] Starting macOS Vision OCR for {pdf_path} (Total {len(doc)} pages)...", file=sys.stderr)
+    
+    for i, page in enumerate(doc):
+        if i % 10 == 0 or i == len(doc) - 1:
+            print(f"[OCR] Processing page {i+1}/{len(doc)}...", file=sys.stderr)
+            
+        pix = page.get_pixmap(dpi=150)
+        img_bytes = pix.tobytes("png")
+        
+        data = NSData.dataWithBytes_length_(img_bytes, len(img_bytes))
+        image_source = CGImageSourceCreateWithData(data, None)
+        if not image_source:
+            continue
+        cg_image = CGImageSourceCreateImageAtIndex(image_source, 0, None)
+        if not cg_image:
+            continue
+            
+        page_texts = []
+        def handler(request, error):
+            if error:
+                return
+            observations = request.results()
+            if observations:
+                for obs in observations:
+                    candidates = obs.topCandidates_(1)
+                    if candidates:
+                        page_texts.append(candidates[0].string())
+                        
+        request = Vision.VNRecognizeTextRequest.alloc().initWithCompletionHandler_(handler)
+        request.setRecognitionLanguages_(["ko-KR", "en-US"])
+        request.setRecognitionLevel_(Vision.VNRequestTextRecognitionLevelAccurate)
+        
+        handler_obj = Vision.VNImageRequestHandler.alloc().initWithCGImage_options_(cg_image, None)
+        success, error = handler_obj.performRequests_error_([request], None)
+        
+        if success and page_texts:
+            text_parts.append("\n".join(page_texts))
+            
+    print(f"[OCR] Completed macOS Vision OCR for {pdf_path}.", file=sys.stderr)
+    return "\n\n".join(text_parts)
+
+def extract_pdf_text_ocr_gemini(pdf_path, api_key):
+    import fitz
+    import urllib.request
+    import json
+    import base64
+    import ssl
+    import time
+    
+    doc = fitz.open(pdf_path)
+    text_parts = []
+    print(f"[OCR-Gemini] Starting Gemini OCR for {pdf_path} (Total {len(doc)} pages)...", file=sys.stderr)
+    
+    for i, page in enumerate(doc):
+        if i > 0:
+            time.sleep(1.5)
+            
+        if i % 5 == 0 or i == len(doc) - 1:
+            print(f"[OCR-Gemini] Requesting page {i+1}/{len(doc)} to Gemini API...", file=sys.stderr)
+            
+        pix = page.get_pixmap(dpi=150)
+        img_bytes = pix.tobytes("png")
+        base64_image = base64.b64encode(img_bytes).decode('utf-8')
+        
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+        
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": "이 이미지에 적힌 한글과 영문 텍스트를 보이지 않는 서식이나 누락 없이 그대로 추출해서 텍스트로 반환해주세요. 임의의 부연 설명이나 요약 없이 텍스트 알맹이만 그대로 출력해주세요."},
+                        {
+                            "inlineData": {
+                                "mimeType": "image/png",
+                                "data": base64_image
+                            }
+                        }
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.1
+            }
+        }
+        
+        data = json.dumps(payload).encode('utf-8')
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={'Content-Type': 'application/json'}
+        )
+        
+        try:
+            ctx = ssl._create_unverified_context()
+            with urllib.request.urlopen(req, timeout=45, context=ctx) as response:
+                res_data = json.loads(response.read().decode('utf-8'))
+                candidates = res_data.get('candidates', [])
+                if candidates:
+                    parts = candidates[0].get('content', {}).get('parts', [])
+                    text_out = "".join([p.get('text', '') for p in parts]).strip()
+                    if text_out:
+                        text_parts.append(text_out)
+        except Exception as e:
+            print(f"[OCR-Gemini] Error on page {i+1}: {e}", file=sys.stderr)
+            continue
+            
+    print(f"[OCR-Gemini] Completed Gemini OCR for {pdf_path}.", file=sys.stderr)
+    return "\n\n".join(text_parts)
+
+def extract_pdf_text(pdf_path, api_key=None):
     try:
         reader = pypdf.PdfReader(pdf_path)
         text_parts = []
@@ -165,9 +282,49 @@ def extract_pdf_text(pdf_path):
             extracted = page.extract_text()
             if extracted:
                 text_parts.append(extracted)
-        return "\n".join(text_parts)
+        combined_text = "\n".join(text_parts)
+        method = 'pypdf'
     except Exception as e:
-        raise ValueError(f"PDF 텍스트 추출 중 오류가 발생했습니다: {str(e)}")
+        combined_text = ""
+        method = 'failed'
+        print(f"pypdf extraction failed: {e}", file=sys.stderr)
+        
+    if len(combined_text.strip()) < 100:
+        print(f"Normal text extraction extracted very little text ({len(combined_text)} chars). Switching to OCR...", file=sys.stderr)
+        
+        import platform
+        is_mac = platform.system() == "Darwin"
+        
+        if is_mac:
+            try:
+                ocr_text = extract_pdf_text_ocr_vision(pdf_path)
+                if ocr_text.strip():
+                    return ocr_text, 'Vision OCR'
+            except Exception as ocr_e:
+                print(f"macOS Vision OCR failed: {ocr_e}", file=sys.stderr)
+                pass
+                
+        if api_key:
+            try:
+                ocr_text = extract_pdf_text_ocr_gemini(pdf_path, api_key)
+                if ocr_text.strip():
+                    return ocr_text, 'Gemini OCR'
+            except Exception as gemini_e:
+                print(f"Gemini OCR failed: {gemini_e}", file=sys.stderr)
+                pass
+                
+        if not is_mac and not api_key:
+            raise ValueError(
+                "스캔된(이미지 형식) PDF 파일입니다. 텍스트를 추출하려면 OCR 기능이 필요하지만, "
+                "현재 macOS 환경이 아니거나 Gemini API Key가 입력되지 않아 OCR을 진행할 수 없습니다."
+            )
+        else:
+            raise ValueError(
+                "스캔된(이미지 형식) PDF 파일의 OCR 텍스트 추출에 실패했습니다. "
+                "PDF 파일이 손상되었거나 이미지 해상도가 너무 낮을 수 있습니다."
+            )
+            
+    return combined_text, method
 
 BIBLE_MAP = {
     "창": "창세기", "출": "출애굽기", "레": "레위기", "민": "민수기", "신": "신명기",
@@ -477,8 +634,7 @@ def convert_file(file_path, dest_path, overwrite, api_key=None):
     try:
         ext = file_path.suffix.lower()
         if ext == '.pdf':
-            text = extract_pdf_text(file_path)
-            method = 'pypdf'
+            text, method = extract_pdf_text(file_path, api_key)
         else:
             text, method = extract_hwp_text(file_path)
             
