@@ -399,6 +399,11 @@
                 하위폴더 포함 (recursive)
             </label>
 
+            <label class="checkbox-label" title="텍스트가 깨져서 변환되는 PDF 파일의 경우 체크하면 강제로 이미지 OCR을 적용해 깨짐을 방지합니다.">
+                <input type="checkbox" id="forceOcr">
+                글자 깨짐 방지 (강제 OCR)
+            </label>
+
             <div class="workers-group">
                 <label for="workers">작업자 수:</label>
                 <input type="number" id="workers" class="input-number" min="1" max="8" value="4">
@@ -480,6 +485,9 @@
         if (localStorage.getItem('overwriteMode')) {
             document.getElementById('overwriteMode').value = localStorage.getItem('overwriteMode');
         }
+        if (localStorage.getItem('forceOcr') === 'true') {
+            document.getElementById('forceOcr').checked = true;
+        }
     });
 
     async function scanFiles() {
@@ -549,11 +557,13 @@
         const overwrite = overwriteMode === 'overwrite';
         const recursive = document.getElementById('recursive').checked;
         const workers = parseInt(document.getElementById('workers').value) || 4;
+        const forceOcr = document.getElementById('forceOcr').checked;
         
         localStorage.setItem('inputFolder', inputFolder);
         localStorage.setItem('vaultPath', vaultPath);
         localStorage.setItem('apiKey', apiKey);
         localStorage.setItem('overwriteMode', overwriteMode);
+        localStorage.setItem('forceOcr', forceOcr);
         
         const startBtn = document.getElementById('startBtn');
         const scanBtn = document.getElementById('scanBtn');
@@ -607,7 +617,8 @@
                 vault_path: vaultPath,
                 overwrite: overwrite,
                 recursive: recursive,
-                workers: workers
+                workers: workers,
+                force_ocr: forceOcr
             };
             if (apiKey) {
                 payload.api_key = apiKey;

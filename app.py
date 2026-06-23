@@ -274,23 +274,27 @@ def extract_pdf_text_ocr_gemini(pdf_path, api_key):
     print(f"[OCR-Gemini] Completed Gemini OCR for {pdf_path}.", file=sys.stderr)
     return "\n\n".join(text_parts)
 
-def extract_pdf_text(pdf_path, api_key=None):
-    try:
-        reader = pypdf.PdfReader(pdf_path)
-        text_parts = []
-        for page in reader.pages:
-            extracted = page.extract_text()
-            if extracted:
-                text_parts.append(extracted)
-        combined_text = "\n".join(text_parts)
-        method = 'pypdf'
-    except Exception as e:
-        combined_text = ""
-        method = 'failed'
-        print(f"pypdf extraction failed: {e}", file=sys.stderr)
+def extract_pdf_text(pdf_path, api_key=None, force_ocr=False):
+    combined_text = ""
+    method = 'failed'
+    
+    if not force_ocr:
+        try:
+            reader = pypdf.PdfReader(pdf_path)
+            text_parts = []
+            for page in reader.pages:
+                extracted = page.extract_text()
+                if extracted:
+                    text_parts.append(extracted)
+            combined_text = "\n".join(text_parts)
+            method = 'pypdf'
+        except Exception as e:
+            combined_text = ""
+            method = 'failed'
+            print(f"pypdf extraction failed: {e}", file=sys.stderr)
         
-    if len(combined_text.strip()) < 100:
-        print(f"Normal text extraction extracted very little text ({len(combined_text)} chars). Switching to OCR...", file=sys.stderr)
+    if force_ocr or len(combined_text.strip()) < 100:
+        print(f"Running OCR for {pdf_path} (force_ocr={force_ocr}, text_len={len(combined_text)})...", file=sys.stderr)
         
         import platform
         is_mac = platform.system() == "Darwin"
@@ -725,7 +729,7 @@ def format_markdown(text, file_path, api_key=None):
     )
     return frontmatter + markdown_body
 
-def convert_file(file_path, dest_path, overwrite, api_key=None):
+def convert_file(file_path, dest_path, overwrite, api_key=None, force_ocr=False):
     filename = file_path.name
     if not overwrite and dest_path.exists():
         return filename, 'skip', 'skip'
@@ -734,7 +738,7 @@ def convert_file(file_path, dest_path, overwrite, api_key=None):
     try:
         ext = file_path.suffix.lower()
         if ext == '.pdf':
-            text, method = extract_pdf_text(file_path, api_key)
+            text, method = extract_pdf_text(file_path, api_key, force_ocr)
         else:
             text, method = extract_hwp_text(file_path)
             
@@ -795,6 +799,7 @@ def convert():
     workers = int(data.get('workers', 4))
     recursive = data.get('recursive', False)
     api_key = data.get('api_key', '').strip()
+    force_ocr = data.get('force_ocr', False)
     
     if not input_folder or not vault_path:
         return jsonify({"error": "input_folder and vault_path are required"}), 400
@@ -842,7 +847,7 @@ def convert():
             for file_path in files_to_convert:
                 relative_path = file_path.relative_to(input_path)
                 dest_path = vault_path_resolved / relative_path.with_suffix('.md')
-                future = executor.submit(convert_file, file_path, dest_path, overwrite, api_key)
+                future = executor.submit(convert_file, file_path, dest_path, overwrite, api_key, force_ocr)
                 future_to_file[future] = file_path
                 
             for future in concurrent.futures.as_completed(future_to_file):
