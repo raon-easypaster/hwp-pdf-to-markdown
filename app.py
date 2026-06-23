@@ -157,11 +157,16 @@ def extract_hwp_text(hwp_path):
         
     raise ValueError("All HWP extraction stages failed or returned empty text.")
 
-def extract_pdf_text_ocr_vision(pdf_path):
+def extract_pdf_text_ocr_vision(pdf_path, api_key=None):
     import fitz
     import Vision
     from Quartz import CGImageSourceCreateWithData, CGImageSourceCreateImageAtIndex
     from Foundation import NSData
+    import base64
+    import urllib.request
+    import json
+    import ssl
+    import time
     
     doc = fitz.open(pdf_path)
     text_parts = []
@@ -171,39 +176,84 @@ def extract_pdf_text_ocr_vision(pdf_path):
         if i % 10 == 0 or i == len(doc) - 1:
             print(f"[OCR] Processing page {i+1}/{len(doc)}...", file=sys.stderr)
             
-        pix = page.get_pixmap(dpi=150)
-        img_bytes = pix.tobytes("png")
-        
-        data = NSData.dataWithBytes_length_(img_bytes, len(img_bytes))
-        image_source = CGImageSourceCreateWithData(data, None)
-        if not image_source:
-            continue
-        cg_image = CGImageSourceCreateImageAtIndex(image_source, 0, None)
-        if not cg_image:
-            continue
+        page_text = ""
+        # Try local Vision OCR first
+        try:
+            pix = page.get_pixmap(dpi=150)
+            img_bytes = pix.tobytes("png")
+            data = NSData.dataWithBytes_length_(img_bytes, len(img_bytes))
+            image_source = CGImageSourceCreateWithData(data, None)
+            if image_source:
+                cg_image = CGImageSourceCreateImageAtIndex(image_source, 0, None)
+                if cg_image:
+                    page_texts = []
+                    def handler(request, error):
+                        if error:
+                            return
+                        observations = request.results()
+                        if observations:
+                            for obs in observations:
+                                candidates = obs.topCandidates_(1)
+                                if candidates:
+                                    page_texts.append(candidates[0].string())
+                                    
+                    request = Vision.VNRecognizeTextRequest.alloc().initWithCompletionHandler_(handler)
+                    request.setRecognitionLanguages_(["ko-KR", "en-US"])
+                    request.setRecognitionLevel_(Vision.VNRequestTextRecognitionLevelAccurate)
+                    
+                    handler_obj = Vision.VNImageRequestHandler.alloc().initWithCGImage_options_(cg_image, None)
+                    success, error = handler_obj.performRequests_error_([request], None)
+                    
+                    if success and page_texts:
+                        page_text = "\n".join(page_texts)
+        except Exception as ocr_page_e:
+            print(f"[OCR] Local Vision OCR failed on page {i+1}: {ocr_page_e}", file=sys.stderr)
+            page_text = ""
             
-        page_texts = []
-        def handler(request, error):
-            if error:
-                return
-            observations = request.results()
-            if observations:
-                for obs in observations:
-                    candidates = obs.topCandidates_(1)
+        # Per-page fallback to Gemini API if local Vision fails
+        if not page_text.strip() and api_key:
+            print(f"[OCR] Local Vision failed on page {i+1}. Querying Gemini OCR fallback...", file=sys.stderr)
+            time.sleep(1.5)
+            try:
+                pix = page.get_pixmap(dpi=150)
+                img_bytes = pix.tobytes("png")
+                base64_image = base64.b64encode(img_bytes).decode('utf-8')
+                
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+                payload = {
+                    "contents": [
+                        {
+                            "parts": [
+                                {"text": "이 이미지에 적힌 한글과 영문 텍스트를 보이지 않는 서식이나 누락 없이 그대로 추출해서 텍스트로 반환해주세요. 임의의 부연 설명이나 요약 없이 텍스트 알맹이만 그대로 출력해주세요."},
+                                {
+                                    "inlineData": {
+                                        "mimeType": "image/png",
+                                        "data": base64_image
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    "generationConfig": {"temperature": 0.1}
+                }
+                
+                req_data = json.dumps(payload).encode('utf-8')
+                req = urllib.request.Request(url, data=req_data, headers={'Content-Type': 'application/json'})
+                
+                ctx = ssl._create_unverified_context()
+                with urllib.request.urlopen(req, timeout=45, context=ctx) as response:
+                    res_data = json.loads(response.read().decode('utf-8'))
+                    candidates = res_data.get('candidates', [])
                     if candidates:
-                        page_texts.append(candidates[0].string())
-                        
-        request = Vision.VNRecognizeTextRequest.alloc().initWithCompletionHandler_(handler)
-        request.setRecognitionLanguages_(["ko-KR", "en-US"])
-        request.setRecognitionLevel_(Vision.VNRequestTextRecognitionLevelAccurate)
-        
-        handler_obj = Vision.VNImageRequestHandler.alloc().initWithCGImage_options_(cg_image, None)
-        success, error = handler_obj.performRequests_error_([request], None)
-        
-        if success and page_texts:
-            text_parts.append("\n".join(page_texts))
+                        parts = candidates[0].get('content', {}).get('parts', [])
+                        page_text = "".join([p.get('text', '') for p in parts]).strip()
+            except Exception as gemini_page_e:
+                print(f"[OCR] Gemini OCR fallback failed on page {i+1}: {gemini_page_e}", file=sys.stderr)
+                
+        if page_text:
+            text_parts.append(page_text)
             
-    print(f"[OCR] Completed macOS Vision OCR for {pdf_path}.", file=sys.stderr)
+    print(f"[OCR] Completed OCR for {pdf_path}.", file=sys.stderr)
     return "\n\n".join(text_parts)
 
 def extract_pdf_text_ocr_gemini(pdf_path, api_key):
@@ -359,7 +409,7 @@ def extract_pdf_text(pdf_path, api_key=None, force_ocr=False):
         
         if is_mac:
             try:
-                ocr_text = extract_pdf_text_ocr_vision(pdf_path)
+                ocr_text = extract_pdf_text_ocr_vision(pdf_path, api_key)
                 if ocr_text.strip():
                     return ocr_text, 'Vision OCR'
             except Exception as ocr_e:
