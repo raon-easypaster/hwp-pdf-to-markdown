@@ -6,13 +6,18 @@ import re
 import datetime
 import subprocess
 import concurrent.futures
+import shutil
+import zipfile
+import uuid
+import time
+import tempfile
 from pathlib import Path
-from flask import Flask, request, jsonify, send_from_directory, Response, stream_with_context
+from flask import Flask, request, jsonify, send_from_directory, Response, stream_with_context, session, redirect, url_for
 import olefile
 import pypdf
 import urllib.request
-
 import platform
+
 if platform.system() == "Darwin":
     try:
         import Vision
@@ -166,12 +171,9 @@ def extract_hwp_text(hwp_path):
         
     raise ValueError("All HWP extraction stages failed or returned empty text.")
 
-def extract_pdf_text_ocr_vision(pdf_path, api_key=None, progress_callback=None):
+def extract_pdf_text_ocr_vision(pdf_path, api_key=None, access_token=None, project_id=None, progress_callback=None):
     import fitz
     import base64
-    import urllib.request
-    import json
-    import ssl
     import time
     
     doc = fitz.open(pdf_path)
@@ -216,43 +218,15 @@ def extract_pdf_text_ocr_vision(pdf_path, api_key=None, progress_callback=None):
             print(f"[OCR] Local Vision OCR failed on page {i+1}: {ocr_page_e}", file=sys.stderr)
             page_text = ""
             
-        # Per-page fallback to Gemini API if local Vision fails
-        if not page_text.strip() and api_key:
+        # Per-page fallback to Gemini API/Subscription if local Vision fails
+        if not page_text.strip() and (api_key or (access_token and project_id)):
             print(f"[OCR] Local Vision failed on page {i+1}. Querying Gemini OCR fallback...", file=sys.stderr)
             time.sleep(1.5)
             try:
                 pix = page.get_pixmap(dpi=150)
                 img_bytes = pix.tobytes("png")
                 base64_image = base64.b64encode(img_bytes).decode('utf-8')
-                
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
-                payload = {
-                    "contents": [
-                        {
-                            "parts": [
-                                {"text": "이 이미지에 적힌 한글과 영문 텍스트를 보이지 않는 서식이나 누락 없이 그대로 추출해서 텍스트로 반환해주세요. 임의의 부연 설명이나 요약 없이 텍스트 알맹이만 그대로 출력해주세요."},
-                                {
-                                    "inlineData": {
-                                        "mimeType": "image/png",
-                                        "data": base64_image
-                                    }
-                                }
-                            ]
-                        }
-                    ],
-                    "generationConfig": {"temperature": 0.1}
-                }
-                
-                req_data = json.dumps(payload).encode('utf-8')
-                req = urllib.request.Request(url, data=req_data, headers={'Content-Type': 'application/json'})
-                
-                ctx = ssl._create_unverified_context()
-                with urllib.request.urlopen(req, timeout=45, context=ctx) as response:
-                    res_data = json.loads(response.read().decode('utf-8'))
-                    candidates = res_data.get('candidates', [])
-                    if candidates:
-                        parts = candidates[0].get('content', {}).get('parts', [])
-                        page_text = "".join([p.get('text', '') for p in parts]).strip()
+                page_text = query_gemini_ocr_page(base64_image, api_key, access_token, project_id)
             except Exception as gemini_page_e:
                 print(f"[OCR] Gemini OCR fallback failed on page {i+1}: {gemini_page_e}", file=sys.stderr)
                 
@@ -268,12 +242,9 @@ def extract_pdf_text_ocr_vision(pdf_path, api_key=None, progress_callback=None):
     print(f"[OCR] Completed OCR for {pdf_path}.", file=sys.stderr)
     return "\n\n".join(text_parts)
 
-def extract_pdf_text_ocr_gemini(pdf_path, api_key, progress_callback=None):
+def extract_pdf_text_ocr_gemini(pdf_path, api_key=None, access_token=None, project_id=None, progress_callback=None):
     import fitz
-    import urllib.request
-    import json
     import base64
-    import ssl
     import time
     
     doc = fitz.open(pdf_path)
@@ -287,48 +258,13 @@ def extract_pdf_text_ocr_gemini(pdf_path, api_key, progress_callback=None):
         if i % 5 == 0 or i == len(doc) - 1:
             print(f"[OCR-Gemini] Requesting page {i+1}/{len(doc)} to Gemini API...", file=sys.stderr)
             
-        pix = page.get_pixmap(dpi=150)
-        img_bytes = pix.tobytes("png")
-        base64_image = base64.b64encode(img_bytes).decode('utf-8')
-        
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
-        
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {"text": "이 이미지에 적힌 한글과 영문 텍스트를 보이지 않는 서식이나 누락 없이 그대로 추출해서 텍스트로 반환해주세요. 임의의 부연 설명이나 요약 없이 텍스트 알맹이만 그대로 출력해주세요."},
-                        {
-                            "inlineData": {
-                                "mimeType": "image/png",
-                                "data": base64_image
-                            }
-                        }
-                    ]
-                }
-            ],
-            "generationConfig": {
-                "temperature": 0.1
-            }
-        }
-        
-        data = json.dumps(payload).encode('utf-8')
-        req = urllib.request.Request(
-            url,
-            data=data,
-            headers={'Content-Type': 'application/json'}
-        )
-        
         try:
-            ctx = ssl._create_unverified_context()
-            with urllib.request.urlopen(req, timeout=45, context=ctx) as response:
-                res_data = json.loads(response.read().decode('utf-8'))
-                candidates = res_data.get('candidates', [])
-                if candidates:
-                    parts = candidates[0].get('content', {}).get('parts', [])
-                    text_out = "".join([p.get('text', '') for p in parts]).strip()
-                    if text_out:
-                        text_parts.append(text_out)
+            pix = page.get_pixmap(dpi=150)
+            img_bytes = pix.tobytes("png")
+            base64_image = base64.b64encode(img_bytes).decode('utf-8')
+            text_out = query_gemini_ocr_page(base64_image, api_key, access_token, project_id)
+            if text_out:
+                text_parts.append(text_out)
         except Exception as e:
             print(f"[OCR-Gemini] Error on page {i+1}: {e}", file=sys.stderr)
             
@@ -393,7 +329,7 @@ def is_corrupted_korean(text):
         return True
     return False
 
-def extract_pdf_text(pdf_path, api_key=None, force_ocr=False, progress_callback=None):
+def extract_pdf_text(pdf_path, api_key=None, access_token=None, project_id=None, force_ocr=False, progress_callback=None):
     combined_text = ""
     method = 'failed'
     
@@ -426,26 +362,26 @@ def extract_pdf_text(pdf_path, api_key=None, force_ocr=False, progress_callback=
         
         if is_mac:
             try:
-                ocr_text = extract_pdf_text_ocr_vision(pdf_path, api_key, progress_callback)
+                ocr_text = extract_pdf_text_ocr_vision(pdf_path, api_key, access_token, project_id, progress_callback)
                 if ocr_text.strip():
                     return ocr_text, 'Vision OCR'
             except Exception as ocr_e:
                 print(f"macOS Vision OCR failed: {ocr_e}", file=sys.stderr)
                 pass
                 
-        if api_key:
+        if api_key or (access_token and project_id):
             try:
-                ocr_text = extract_pdf_text_ocr_gemini(pdf_path, api_key, progress_callback)
+                ocr_text = extract_pdf_text_ocr_gemini(pdf_path, api_key, access_token, project_id, progress_callback)
                 if ocr_text.strip():
                     return ocr_text, 'Gemini OCR'
             except Exception as gemini_e:
                 print(f"Gemini OCR failed: {gemini_e}", file=sys.stderr)
                 pass
                 
-        if not is_mac and not api_key:
+        if not is_mac and not api_key and not access_token:
             raise ValueError(
                 "스캔된(이미지 형식) PDF 파일입니다. 텍스트를 추출하려면 OCR 기능이 필요하지만, "
-                "현재 macOS 환경이 아니거나 Gemini API Key가 입력되지 않아 OCR을 진행할 수 없습니다."
+                "현재 macOS 환경이 아니거나 Gemini API Key 또는 Google 구독 연동 정보가 설정되지 않아 OCR을 진행할 수 없습니다."
             )
         else:
             raise ValueError(
@@ -525,7 +461,7 @@ def merge_broken_lines(text):
         if current_paragraph:
             prev_line = current_paragraph[-1]
             is_sentence_end = prev_line.endswith(('.', '?', '!', '"', "'", ')', '}', ']')) or \
-                               prev_line.endswith(('다', '요', '오', '죠', '냐', '디', '음', '임', '기', '코'))
+                                prev_line.endswith(('다', '요', '오', '죠', '냐', '디', '음', '임', '기', '코'))
             
             if is_sentence_end:
                 merged_lines.append(merge_paragraph(current_paragraph))
@@ -613,6 +549,380 @@ SUMMARY_FULL:
 TAGS:
 #태그1, #태그2, #태그3, #태그4, #태그5, #태그6, #태그7, #태그8, #태그9, #태그10"""
 
+# ═══════════════ Google Gemini OAuth (Subscription Connection) ═══════════════
+import secrets
+import hashlib
+import base64
+import threading
+import ssl
+import urllib.parse
+
+GEMINI_OAUTH_CLIENT_ID = "681255809395-" + "oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
+GEMINI_OAUTH_CLIENT_SECRET = "GOCSPX-" + "4uHgMPm-1o7Sk-geV6Cu5clXFsxl"
+GEMINI_OAUTH_REDIRECT_URI = "http://localhost:8085/oauth2callback"
+GEMINI_OAUTH_SCOPES = "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile"
+
+TOKEN_FILE = Path(__file__).parent / 'gemini_token.json'
+
+# Global dictionary to store temporary PKCE session variables
+oauth_session = {
+    "verifier": None,
+    "state": None,
+    "email": None,
+    "error": None,
+    "success": False
+}
+
+def generate_pkce():
+    verifier = secrets.token_urlsafe(64)
+    sha256_hash = hashlib.sha256(verifier.encode('utf-8')).digest()
+    challenge = base64.urlsafe_b64encode(sha256_hash).decode('utf-8').rstrip('=')
+    return verifier, challenge
+
+def build_gemini_authorize_url(state, challenge):
+    params = {
+        "response_type": "code",
+        "client_id": GEMINI_OAUTH_CLIENT_ID,
+        "redirect_uri": GEMINI_OAUTH_REDIRECT_URI,
+        "scope": GEMINI_OAUTH_SCOPES,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+        "access_type": "offline",
+        "prompt": "consent",
+        "state": state
+    }
+    return "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params)
+
+# Local HTTP callback listener on port 8085
+class CallbackServerThread(threading.Thread):
+    def __init__(self, expected_state, on_code_received):
+        super().__init__()
+        self.expected_state = expected_state
+        self.on_code_received = on_code_received
+        self.server = None
+        
+    def run(self):
+        from http.server import HTTPServer, BaseHTTPRequestHandler
+        import urllib.parse
+        
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, format, *args):
+                pass  # suppress logging
+                
+            def do_GET(self):
+                query = urllib.parse.urlparse(self.path).query
+                params = urllib.parse.parse_qs(query)
+                code = params.get('code', [None])[0]
+                incoming_state = params.get('state', [None])[0]
+                
+                if incoming_state != self.server.expected_state:
+                    self.send_response(400)
+                    self.end_headers()
+                    self.wfile.write(b"Invalid state parameter.")
+                    return
+                    
+                if not code:
+                    self.send_response(400)
+                    self.end_headers()
+                    self.wfile.write(b"Missing authorization code.")
+                    return
+                    
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                self.end_headers()
+                
+                self.wfile.write(
+                    "<!doctype html><html><head><title>\uc778\uc99d \uc644\ub8cc</title>"
+                    "<style>body { font-family: -apple-system, sans-serif; text-align: center; padding: 50px; background-color: #fbfbfa; color: #0a0d0b; } "
+                    "h2 { color: #134538; } .card { background: white; border: 1px solid #e6e8e6; padding: 30px; border-radius: 12px; max-width: 400px; margin: 0 auto; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }</style></head>"
+                    "<body><div class='card'><h2>\uc131\uacf5\uc801\uc73c\ub85c \uc778\uc99d\ub418\uc5c8\uc2b5\ub2c8\ub2e4!</h2><p>\uad6c\ub3c5 \uc5f0\ub3d9\uc774 \uc644\ub8cc\ub418\uc5c8\uc2b5\ub2c8\ub2e4.<br>\uc774 \uc6f9 \ube0c\ub77c\uc6b0\uc800 \ucc3d\uc744 \ub2eb\uace0 \ubb38\uc11c \ubcc0\ud658\uae30 \ud654\uba74\uc73c\ub85c \ub3cc\uc544\uac00 \uc8fc\uc138\uc694.</p>"
+                    "<script>setTimeout(() => window.close(), 2000)</script></div></body></html>".encode('utf-8')
+                )
+                
+                self.server.on_code_received(code)
+                threading.Thread(target=self.server.shutdown).start()
+                
+        try:
+            self.server = HTTPServer(('127.0.0.1', 8085), Handler)
+            self.server.expected_state = self.expected_state
+            self.server.timeout = 300
+            self.server.serve_forever()
+        except Exception as e:
+            print(f"Error starting OAuth callback server on port 8085: {e}", file=sys.stderr)
+            oauth_session["error"] = f"포트 8085를 사용할 수 없습니다: {str(e)}"
+
+def get_gemini_oauth_token():
+    if not TOKEN_FILE.exists():
+        return None
+        
+    try:
+        with open(TOKEN_FILE, 'r', encoding='utf-8') as f:
+            token_data = json.load(f)
+    except Exception:
+        return None
+        
+    # Check if token is expired (subtract 60 seconds margin)
+    expires_at = token_data.get('expires_at', 0)
+    if expires_at - 60 > time.time():
+        return token_data.get('access_token')
+        
+    # If expired, try to refresh
+    refresh_token = token_data.get('refresh_token')
+    if not refresh_token:
+        return None
+        
+    try:
+        url = "https://oauth2.googleapis.com/token"
+        payload = {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": GEMINI_OAUTH_CLIENT_ID,
+            "client_secret": GEMINI_OAUTH_CLIENT_SECRET
+        }
+        data = urllib.parse.urlencode(payload).encode('utf-8')
+        req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/x-www-form-urlencoded'})
+        
+        ctx = ssl._create_unverified_context()
+        with urllib.request.urlopen(req, timeout=15, context=ctx) as response:
+            res = json.loads(response.read().decode('utf-8'))
+            
+        token_data['access_token'] = res['access_token']
+        if 'refresh_token' in res:
+            token_data['refresh_token'] = res['refresh_token']
+        token_data['expires_at'] = time.time() + res.get('expires_in', 3600)
+        
+        with open(TOKEN_FILE, 'w', encoding='utf-8') as f:
+            json.dump(token_data, f, ensure_ascii=False, indent=2)
+            
+        return token_data['access_token']
+    except Exception as e:
+        print(f"Failed to refresh Google OAuth token: {e}", file=sys.stderr)
+        return None
+
+def ensure_gemini_project_id(access_token):
+    if TOKEN_FILE.exists():
+        try:
+            with open(TOKEN_FILE, 'r', encoding='utf-8') as f:
+                token_data = json.load(f)
+            if token_data.get('project_id'):
+                return token_data.get('project_id')
+        except Exception:
+            pass
+            
+    url = "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist"
+    payload = {
+        "metadata": {
+            "ideType": "IDE_UNSPECIFIED",
+            "platform": "PLATFORM_UNSPECIFIED",
+            "pluginType": "GEMINI"
+        }
+    }
+    data = json.dumps(payload).encode('utf-8')
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {access_token}',
+            'User-Agent': 'google-api-nodejs-client/9.15.1',
+            'X-Goog-Api-Client': 'gl-node/22.17.0',
+            'Client-Metadata': 'ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI'
+        }
+    )
+    
+    ctx = ssl._create_unverified_context()
+    try:
+        with urllib.request.urlopen(req, timeout=15, context=ctx) as response:
+            res = json.loads(response.read().decode('utf-8'))
+            
+        project_id = res.get('cloudaicompanionProject')
+        if project_id:
+            save_project_id_to_token(project_id)
+            return project_id
+            
+        allowed_tiers = res.get('allowedTiers', [])
+        tier_id = "FREE"
+        for tier in allowed_tiers:
+            if tier.get('isDefault'):
+                tier_id = tier.get('id', 'FREE')
+                break
+        if not allowed_tiers and res.get('currentTier', {}).get('id'):
+            tier_id = res.get('currentTier', {}).get('id', 'FREE')
+            
+        onboard_url = "https://cloudcode-pa.googleapis.com/v1internal:onboardUser"
+        onboard_payload = {
+            "tierId": tier_id,
+            "metadata": {
+                "ideType": "IDE_UNSPECIFIED",
+                "platform": "PLATFORM_UNSPECIFIED",
+                "pluginType": "GEMINI"
+            }
+        }
+        
+        for attempt in range(5):
+            try:
+                onboard_req = urllib.request.Request(
+                    onboard_url,
+                    data=json.dumps(onboard_payload).encode('utf-8'),
+                    headers={
+                        'Content-Type': 'application/json',
+                        'Authorization': f'Bearer {access_token}',
+                        'User-Agent': 'google-api-nodejs-client/9.15.1',
+                        'X-Goog-Api-Client': 'gl-node/22.17.0',
+                        'Client-Metadata': 'ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI'
+                    }
+                )
+                with urllib.request.urlopen(onboard_req, timeout=15, context=ctx) as onboard_res:
+                    onboard_data = json.loads(onboard_res.read().decode('utf-8'))
+                    
+                managed_project_id = onboard_data.get('response', {}).get('cloudaicompanionProject', {}).get('id')
+                if onboard_data.get('done') and managed_project_id:
+                    save_project_id_to_token(managed_project_id)
+                    return managed_project_id
+            except Exception as oe:
+                print(f"Onboard attempt {attempt+1} failed: {oe}", file=sys.stderr)
+            time.sleep(2)
+            
+    except Exception as e:
+        print(f"Failed to ensure Gemini project ID: {e}", file=sys.stderr)
+        
+    return None
+
+def save_project_id_to_token(project_id):
+    if TOKEN_FILE.exists():
+        try:
+            with open(TOKEN_FILE, 'r', encoding='utf-8') as f:
+                token_data = json.load(f)
+            token_data['project_id'] = project_id
+            with open(TOKEN_FILE, 'w', encoding='utf-8') as f:
+                json.dump(token_data, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+def get_gemini_analysis_via_subscription(text, access_token, project_id):
+    url = "https://cloudcode-pa.googleapis.com/v1internal:generateContent"
+    truncated_text = text[:30000]
+    
+    request_payload = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [{"text": "다음 설교문/묵상을 분석해주세요:\n\n" + truncated_text}]
+            }
+        ],
+        "systemInstruction": {
+            "parts": [{"text": SYSTEM_PROMPT}]
+        },
+        "generationConfig": {
+            "maxOutputTokens": 2048,
+            "temperature": 0.4
+        }
+    }
+    
+    payload = {
+        "project": project_id,
+        "model": "models/gemini-2.5-flash",
+        "request": request_payload
+    }
+    
+    data = json.dumps(payload).encode('utf-8')
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {access_token}',
+            'User-Agent': 'google-api-nodejs-client/9.15.1',
+            'X-Goog-Api-Client': 'gl-node/22.17.0',
+            'Client-Metadata': 'ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI'
+        }
+    )
+    
+    try:
+        ctx = ssl._create_unverified_context()
+        with urllib.request.urlopen(req, timeout=45, context=ctx) as response:
+            res_data = json.loads(response.read().decode('utf-8'))
+            response_obj = res_data.get('response', res_data)
+            candidates = response_obj.get('candidates', [])
+            if not candidates:
+                raise ValueError("No candidates returned from Gemini API via Subscription")
+            
+            parts = candidates[0].get('content', {}).get('parts', [])
+            text_out = "".join([p.get('text', '') for p in parts]).strip()
+            if not text_out:
+                raise ValueError("Empty response text from Gemini subscription candidates")
+            return text_out
+    except Exception as e:
+        raise RuntimeError(f"Gemini 구독 API 호출 에러: {str(e)}")
+
+def query_gemini_ocr_page(base64_image, api_key=None, access_token=None, project_id=None):
+    prompt_text = "이 이미지에 적힌 한글과 영문 텍스트를 보이지 않는 서식이나 누락 없이 그대로 추출해서 텍스트로 반환해주세요. 임의의 부연 설명이나 요약 없이 텍스트 알맹이만 그대로 출력해주세요."
+    
+    if api_key:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": prompt_text},
+                        {
+                            "inlineData": {
+                                "mimeType": "image/png",
+                                "data": base64_image
+                            }
+                        }
+                    ]
+                }
+            ],
+            "generationConfig": {"temperature": 0.1}
+        }
+        data = json.dumps(payload).encode('utf-8')
+        headers = {'Content-Type': 'application/json'}
+    elif access_token and project_id:
+        url = "https://cloudcode-pa.googleapis.com/v1internal:generateContent"
+        request_payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": prompt_text},
+                        {
+                            "inlineData": {
+                                "mimeType": "image/png",
+                                "data": base64_image
+                            }
+                        }
+                    ]
+                }
+            ],
+            "generationConfig": {"temperature": 0.1}
+        }
+        payload = {
+            "project": project_id,
+            "model": "models/gemini-2.5-flash",
+            "request": request_payload
+        }
+        data = json.dumps(payload).encode('utf-8')
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {access_token}',
+            'User-Agent': 'google-api-nodejs-client/9.15.1',
+            'X-Goog-Api-Client': 'gl-node/22.17.0',
+            'Client-Metadata': 'ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI'
+        }
+    else:
+        raise ValueError("API Key 또는 구독 연동 정보가 필요합니다.")
+
+    req = urllib.request.Request(url, data=data, headers=headers)
+    ctx = ssl._create_unverified_context()
+    with urllib.request.urlopen(req, timeout=45, context=ctx) as response:
+        res_data = json.loads(response.read().decode('utf-8'))
+        response_obj = res_data.get('response', res_data)
+        candidates = response_obj.get('candidates', [])
+        if candidates:
+            parts = candidates[0].get('content', {}).get('parts', [])
+            return "".join([p.get('text', '') for p in parts]).strip()
+    return ""
+
 def get_gemini_analysis(text, api_key):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
     
@@ -644,7 +954,6 @@ def get_gemini_analysis(text, api_key):
     )
     
     try:
-        import ssl
         ctx = ssl._create_unverified_context()
         with urllib.request.urlopen(req, timeout=45, context=ctx) as response:
             res_data = json.loads(response.read().decode('utf-8'))
@@ -793,7 +1102,7 @@ def build_callouts(parsed):
 def extract_local_tags(text, bible_tag=None):
     candidates = [
         "예배", "예식", "성찬", "기도", "성결", "믿음", "사랑", "소망", "은혜", 
-        "예수", "그리스도", "하나님", "성령", "교회", "목회", "신앙", "구원", 
+        "예수", "그ريس도", "하나님", "성령", "교회", "목회", "신앙", "구원", 
         "십자가", "부활", "세례", "장례", "가정", "축복", "찬송", "성경", 
         "말씀", "진리", "전통", "선교", "헌신", "예전", "감사", "생명", "하늘", 
         "평화", "기쁨", "증언", "고백", "임재", "축도", "결혼", "추모", "안수",
@@ -823,7 +1132,7 @@ def extract_local_tags(text, bible_tag=None):
         
     return tags[:10]
 
-def format_markdown(text, file_path, api_key=None):
+def format_markdown(text, file_path, api_key=None, access_token=None, project_id=None):
     bible_books = (
         r"창|출|레|민|신|수|삿|룻|삼상|삼하|왕상|왕하|대상|대하|스|느|에|욥|시|잠|전|아|사|렘|애|겔|단|호|욜|암|옵|욘|미|나|하|습|학|슥|말|"
         r"마|막|눅|요|행|롬|고전|고후|갈|엡|빌|골|살전|살후|딤전|딤후|딛|몬|히|야|벧전|벧후|요일|요이|요삼|유|계"
@@ -877,9 +1186,12 @@ def format_markdown(text, file_path, api_key=None):
     markdown_body = "\n".join(final_lines)
     
     gemini_status = None
-    if api_key:
+    if api_key or (access_token and project_id):
         try:
-            response_text = get_gemini_analysis(markdown_body, api_key)
+            if api_key:
+                response_text = get_gemini_analysis(markdown_body, api_key)
+            else:
+                response_text = get_gemini_analysis_via_subscription(markdown_body, access_token, project_id)
             try:
                 with open(Path(__file__).parent / 'gemini_response_debug.txt', 'w', encoding='utf-8') as f:
                     f.write(response_text)
@@ -945,6 +1257,16 @@ def convert_file(file_path, dest_path, overwrite, api_key=None, force_ocr=False,
         
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     try:
+        # Resolve credentials
+        effective_api_key = api_key
+        access_token = None
+        project_id = None
+        
+        if not effective_api_key:
+            access_token = get_gemini_oauth_token()
+            if access_token:
+                project_id = ensure_gemini_project_id(access_token)
+                
         # Intelligent Text Cache Reuse (with NFC/NFD encoding robustness for macOS)
         reused_text = None
         
@@ -970,25 +1292,25 @@ def convert_file(file_path, dest_path, overwrite, api_key=None, force_ocr=False,
                     print(f"Reusing clean extracted text from existing markdown for {filename} to refresh Gemini metadata...", file=sys.stderr)
             except Exception as reuse_e:
                 print(f"Failed to reuse existing text for {filename}: {reuse_e}", file=sys.stderr)
-
+ 
         if reused_text:
             text = reused_text
             method = 'Cached Text'
         else:
             ext = file_path.suffix.lower()
             if ext == '.pdf':
-                text, method = extract_pdf_text(file_path, api_key, force_ocr, progress_callback)
+                text, method = extract_pdf_text(file_path, effective_api_key, access_token, project_id, force_ocr, progress_callback)
             else:
                 text, method = extract_hwp_text(file_path)
             
         if not text.strip():
             raise ValueError("No text content could be extracted")
         
-        markdown_content, gemini_status = format_markdown(text, file_path, api_key)
+        markdown_content, gemini_status = format_markdown(text, file_path, effective_api_key, access_token, project_id)
         with open(dest_path, 'w', encoding='utf-8') as f:
             f.write(markdown_content)
             
-        if api_key:
+        if effective_api_key or (access_token and project_id):
             if gemini_status == "success":
                 method += ' + Gemini 요약'
             elif gemini_status:
@@ -1003,6 +1325,14 @@ def convert_file(file_path, dest_path, overwrite, api_key=None, force_ocr=False,
 @app.route('/')
 def index():
     return send_from_directory('.', 'index.html')
+
+@app.route('/pdf2jpg/')
+def pdf2jpg_index():
+    return send_from_directory('pdf2jpg', 'index.html')
+
+@app.route('/pdf2jpg/<path:path>')
+def pdf2jpg_static(path):
+    return send_from_directory('pdf2jpg', path)
 
 @app.route('/files', methods=['GET'])
 def get_files():
@@ -1042,9 +1372,9 @@ def convert():
     overwrite = data.get('overwrite', False)
     workers = int(data.get('workers', 4))
     recursive = data.get('recursive', False)
-    api_key = data.get('api_key', '').strip()
     force_ocr = data.get('force_ocr', False)
     
+    api_key = data.get('api_key', '').strip()
     if not input_folder or not vault_path:
         return jsonify({"error": "input_folder and vault_path are required"}), 400
         
@@ -1166,6 +1496,181 @@ def convert():
         
     return Response(stream_with_context(generate()), mimetype='application/x-ndjson')
 
+def cleanup_old_temp_files(zip_dir):
+    try:
+        now = time.time()
+        for p in zip_dir.glob('converted_*.zip'):
+            if p.is_file() and (now - p.stat().st_mtime) > 3600: # 1 hour
+                 p.unlink()
+    except Exception as e:
+        print(f"Error cleaning up temp zip files: {e}", file=sys.stderr)
+
+@app.route('/convert-upload', methods=['POST'])
+def convert_upload():
+    vault_path = request.form.get('vault_path', '').strip()
+    overwrite = request.form.get('overwrite', 'false').lower() == 'true'
+    workers = int(request.form.get('workers', '4'))
+    force_ocr = request.form.get('force_ocr', 'false').lower() == 'true'
+    
+    api_key = request.form.get('api_key', '').strip()
+        
+    uploaded_files = request.files.getlist('files')
+    if not uploaded_files or (len(uploaded_files) == 1 and uploaded_files[0].filename == ''):
+        return jsonify({"error": "업로드된 파일이 없습니다."}), 400
+        
+    temp_input_dir = Path(tempfile.mkdtemp(prefix='hwp_input_'))
+    temp_output_dir = Path(tempfile.mkdtemp(prefix='hwp_output_'))
+    
+    files_to_convert = []
+    for f in uploaded_files:
+        if f.filename:
+            file_name = Path(f.filename).name
+            dest_file = temp_input_dir / file_name
+            f.save(str(dest_file))
+            files_to_convert.append(dest_file)
+            
+    total_files = len(files_to_convert)
+    
+    vault_path_resolved = None
+    if vault_path:
+        try:
+            vault_path_resolved = Path(vault_path).expanduser().resolve()
+        except Exception:
+            pass
+            
+    import queue
+    def generate():
+        ok_count = 0
+        fail_count = 0
+        skip_count = 0
+        
+        yield json.dumps({"type": "start", "total": total_files}, ensure_ascii=False) + "\n"
+        
+        if total_files == 0:
+            shutil.rmtree(str(temp_input_dir), ignore_errors=True)
+            shutil.rmtree(str(temp_output_dir), ignore_errors=True)
+            yield json.dumps({"type": "done", "total": 0, "ok": 0, "fail": 0, "skip": 0}, ensure_ascii=False) + "\n"
+            return
+            
+        progress_queue = queue.Queue()
+        
+        def worker_wrapper(file_path, dest_path, overwrite, api_key, force_ocr):
+            filename = file_path.name
+            relative_file_path = filename
+            
+            def page_callback(page_num, total_pages):
+                progress_queue.put({
+                    "type": "page_progress",
+                    "file": relative_file_path,
+                    "page": page_num,
+                    "total": total_pages
+                })
+                
+            try:
+                filename, status, method = convert_file(file_path, dest_path, overwrite, api_key, force_ocr, page_callback)
+                
+                if status == 'ok' and vault_path_resolved:
+                    try:
+                        vault_path_resolved.mkdir(parents=True, exist_ok=True)
+                        vault_dest = vault_path_resolved / dest_path.name
+                        shutil.copy2(str(dest_path), str(vault_dest))
+                    except Exception as copy_e:
+                        print(f"Failed to copy {filename} to vault: {copy_e}", file=sys.stderr)
+                        
+                progress_queue.put({
+                    "type": "file_done",
+                    "file": relative_file_path,
+                    "status": status,
+                    "method": method
+                })
+            except Exception as e:
+                log_error(file_path, f"Thread error: {str(e)}")
+                progress_queue.put({
+                    "type": "file_done",
+                    "file": relative_file_path,
+                    "status": "fail",
+                    "method": "실패"
+                })
+                
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = []
+            for file_path in files_to_convert:
+                dest_path = temp_output_dir / file_path.with_suffix('.md').name
+                future = executor.submit(worker_wrapper, file_path, dest_path, overwrite, api_key, force_ocr)
+                futures.append(future)
+                
+            active_futures = len(futures)
+            while active_futures > 0 or not progress_queue.empty():
+                try:
+                    msg = progress_queue.get(timeout=0.2)
+                    if msg["type"] == "file_done":
+                        if msg["status"] == "ok":
+                            ok_count += 1
+                        elif msg["status"] == "skip":
+                            skip_count += 1
+                        else:
+                            fail_count += 1
+                            
+                        yield json.dumps({
+                            "type": "progress",
+                            "file": msg["file"],
+                            "status": msg["status"],
+                            "method": msg["method"]
+                        }, ensure_ascii=False) + "\n"
+                    elif msg["type"] == "page_progress":
+                        yield json.dumps({
+                            "type": "page_progress",
+                            "file": msg["file"],
+                            "page": msg["page"],
+                            "total": msg["total"]
+                        }, ensure_ascii=False) + "\n"
+                except queue.Empty:
+                    pass
+                
+                active_futures = sum(1 for f in futures if not f.done())
+                
+        zip_url = None
+        if ok_count > 0:
+            try:
+                zip_id = str(uuid.uuid4())
+                zip_dir = Path(__file__).parent / 'temp_downloads'
+                zip_dir.mkdir(exist_ok=True)
+                
+                cleanup_old_temp_files(zip_dir)
+                
+                zip_file_path = zip_dir / f"converted_{zip_id}.zip"
+                with zipfile.ZipFile(zip_file_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                    for md_file in temp_output_dir.glob('*.md'):
+                        zip_file.write(str(md_file), md_file.name)
+                        
+                zip_url = f"/download-zip/{zip_id}"
+            except Exception as zip_e:
+                print(f"Failed to create ZIP: {zip_e}", file=sys.stderr)
+                
+        shutil.rmtree(str(temp_input_dir), ignore_errors=True)
+        shutil.rmtree(str(temp_output_dir), ignore_errors=True)
+        
+        yield json.dumps({
+            "type": "done",
+            "total": total_files,
+            "ok": ok_count,
+            "fail": fail_count,
+            "skip": skip_count,
+            "zip_url": zip_url
+        }, ensure_ascii=False) + "\n"
+        
+    return Response(stream_with_context(generate()), mimetype='application/x-ndjson')
+
+@app.route('/download-zip/<zip_id>', methods=['GET'])
+def download_zip(zip_id):
+    zip_dir = Path(__file__).parent / 'temp_downloads'
+    zip_id_clean = re.sub(r'[^a-zA-Z0-9\-]', '', zip_id)
+    filename = f"converted_{zip_id_clean}.zip"
+    file_path = zip_dir / filename
+    if not file_path.exists() or not file_path.is_file():
+        return jsonify({"error": "요청하신 다운로드 파일이 만료되었거나 존재하지 않습니다."}), 404
+        
+    return send_from_directory(directory=str(zip_dir), path=filename, as_attachment=True, download_name="converted_markdowns.zip")
 
 @app.route('/open-vault', methods=['POST'])
 def open_vault():
@@ -1183,6 +1688,126 @@ def open_vault():
         return jsonify({"status": "ok"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route('/oauth/start', methods=['POST'])
+def oauth_start():
+    # Clear previous session data
+    oauth_session["verifier"] = None
+    oauth_session["state"] = None
+    oauth_session["email"] = None
+    oauth_session["error"] = None
+    oauth_session["success"] = False
+    
+    try:
+        verifier, challenge = generate_pkce()
+        state = secrets.token_urlsafe(16)
+        
+        oauth_session["verifier"] = verifier
+        oauth_session["state"] = state
+        
+        # Start background server to listen on 8085
+        def on_code_received(code):
+            try:
+                # Exchange code for tokens
+                url = "https://oauth2.googleapis.com/token"
+                payload = {
+                    "grant_type": "authorization_code",
+                    "code": code,
+                    "redirect_uri": GEMINI_OAUTH_REDIRECT_URI,
+                    "client_id": GEMINI_OAUTH_CLIENT_ID,
+                    "client_secret": GEMINI_OAUTH_CLIENT_SECRET,
+                    "code_verifier": oauth_session["verifier"]
+                }
+                data = urllib.parse.urlencode(payload).encode('utf-8')
+                req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/x-www-form-urlencoded'})
+                
+                ctx = ssl._create_unverified_context()
+                with urllib.request.urlopen(req, timeout=15, context=ctx) as response:
+                    res = json.loads(response.read().decode('utf-8'))
+                
+                # Fetch user email
+                email = None
+                try:
+                    user_info_req = urllib.request.Request(
+                        "https://www.googleapis.com/oauth2/v1/userinfo?alt=json",
+                        headers={'Authorization': f"Bearer {res['access_token']}"}
+                    )
+                    with urllib.request.urlopen(user_info_req, timeout=10, context=ctx) as uinfo_res:
+                        uinfo = json.loads(uinfo_res.read().decode('utf-8'))
+                        email = uinfo.get('email')
+                except Exception as ue:
+                    print(f"Could not retrieve user email: {ue}", file=sys.stderr)
+                
+                # Save to gemini_token.json
+                token_data = {
+                    "access_token": res["access_token"],
+                    "refresh_token": res["refresh_token"],
+                    "expires_at": time.time() + res.get("expires_in", 3600),
+                    "email": email
+                }
+                
+                with open(TOKEN_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(token_data, f, ensure_ascii=False, indent=2)
+                
+                oauth_session["email"] = email
+                oauth_session["success"] = True
+                
+                # Onboard project immediately
+                ensure_gemini_project_id(res["access_token"])
+                
+            except Exception as e:
+                print(f"Token exchange error: {e}", file=sys.stderr)
+                oauth_session["error"] = f"토큰 교환 실패: {str(e)}"
+                
+        thread = CallbackServerThread(state, on_code_received)
+        thread.daemon = True
+        thread.start()
+        
+        auth_url = build_gemini_authorize_url(state, challenge)
+        return jsonify({"url": auth_url})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/oauth/status', methods=['GET'])
+def oauth_status():
+    if TOKEN_FILE.exists():
+        try:
+            with open(TOKEN_FILE, 'r', encoding='utf-8') as f:
+                token_data = json.load(f)
+            token = get_gemini_oauth_token()
+            if token:
+                return jsonify({
+                    "authenticated": True,
+                    "email": token_data.get('email')
+                })
+        except Exception:
+            pass
+            
+    if oauth_session["success"]:
+        return jsonify({
+            "authenticated": True,
+            "email": oauth_session["email"]
+        })
+    elif oauth_session["error"]:
+        err = oauth_session["error"]
+        oauth_session["error"] = None
+        return jsonify({
+            "authenticated": False,
+            "error": err
+        })
+        
+    return jsonify({"authenticated": False})
+
+@app.route('/oauth/disconnect', methods=['POST'])
+def oauth_disconnect():
+    if TOKEN_FILE.exists():
+        try:
+            TOKEN_FILE.unlink()
+        except Exception:
+            pass
+    oauth_session["success"] = False
+    oauth_session["email"] = None
+    return jsonify({"status": "disconnected"})
 
 if __name__ == '__main__':
     app.run(host='127.0.0.1', port=5001, debug=True)

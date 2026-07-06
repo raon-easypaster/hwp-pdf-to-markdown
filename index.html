@@ -3,20 +3,66 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>문서(HWP/PDF) → Markdown 변환기</title>
+    <title>HWP/PDF to Markdown</title>
+    <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
     <style>
+        /* ═══════════════ TOKENS — Apple × CMDS Green ═══════════════ */
         :root {
-            --primary: #3C3489;
-            --primary-hover: #2E276E;
-            --background: #FFFFFF;
-            --surface: #F8F7FF;
-            --border: #E4E2F0;
-            --text-main: #2C2A38;
-            --text-muted: #6C6A7C;
-            --success: #2E7D32;
-            --fail: #C62828;
-            --skip: #EF6C00;
-            --terminal-bg: #1A1921;
+            --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Pretendard', 'Helvetica Neue', Arial, sans-serif;
+            --font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Pretendard', 'Helvetica Neue', Arial, sans-serif;
+            --font-mono: ui-monospace, 'SF Mono', 'Menlo', 'Monaco', Consolas, monospace;
+
+            --cmds-green: #134538;
+            --cmds-green-hover: #1a5d4b;
+            --cmds-green-bright: #22896a;
+            --cmds-green-glow: #2fb488;
+            --cmds-green-50: #f1f7f4;
+            --cmds-pink: #E985A2;
+            --cmds-pink-light: #F4A4B8;
+            --cmds-pink-dark: #D16C8A;
+            --cmds-pink-soft: #2b1922;
+
+            /* Light theme (default) */
+            --bg: #fbfbfa;
+            --bg-elev: #ffffff;
+            --bg-subtle: #f5f6f4;
+            --fg: #0a0d0b;
+            --fg-muted: #4a544f;
+            --fg-subtle: #8a938e;
+            --border: #e6e8e6;
+            --border-strong: #d0d3d0;
+            --accent: var(--cmds-green);
+            --accent-soft: var(--cmds-green-50);
+            --accent-on: #FFFFFF;
+            
+            --success: #10B981;
+            --fail: #EF4444;
+            --skip: #F59E0B;
+            --terminal-bg: #0a0d0b;
+            --terminal-text: #dfe5e2;
+            
+            --header-h: 56px;
+        }
+
+        body.dark-mode {
+            /* Dark theme variables */
+            --bg: #06080a;
+            --bg-elev: #0d1411;
+            --bg-subtle: #0a1110;
+            --fg: #f2f4f3;
+            --fg-muted: #9aa39d;
+            --fg-subtle: #626a66;
+            --border: #1a231f;
+            --border-strong: #26302a;
+            --accent: var(--cmds-pink);
+            --accent-soft: var(--cmds-pink-soft);
+            --accent-on: #0a0d0b;
+            
+            --success: #34D399;
+            --fail: #F87171;
+            --skip: #FBBF24;
+            --terminal-bg: #030712;
+            --terminal-text: #F9FAFB;
         }
 
         * {
@@ -26,58 +72,165 @@
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
-            background-color: var(--surface);
-            color: var(--text-main);
-            line-height: 1.5;
-            padding: 40px 20px;
+            font-family: var(--font-sans);
+            background-color: var(--bg);
+            color: var(--fg);
+            line-height: 1.55;
+            letter-spacing: -0.011em;
+            -webkit-font-smoothing: antialiased;
+            padding-top: calc(var(--header-h) + 40px);
+            padding-bottom: 60px;
+            padding-left: 20px;
+            padding-right: 20px;
+            transition: background-color 0.3s, color 0.3s;
         }
 
         .container {
-            max-width: 1000px;
+            max-width: 800px;
             margin: 0 auto;
         }
 
-        /* Header */
-        header {
-            text-align: center;
-            margin-bottom: 30px;
+        /* Hero Section */
+        .hero-section {
+            text-align: left;
+            margin-top: 20px;
+            margin-bottom: 40px;
         }
 
-        header h1 {
-            font-size: 2.2rem;
-            color: var(--primary);
-            font-weight: 700;
-            margin-bottom: 8px;
+        .hero-title {
+            font-family: var(--font-display);
+            font-size: clamp(38px, 6.5vw, 68px);
+            font-weight: 800;
+            line-height: 1.08;
+            letter-spacing: -0.04em;
+            color: var(--fg);
+            margin-bottom: 12px;
+            word-break: keep-all;
+        }
+
+        .hero-title .grad {
+            background-image: linear-gradient(135deg, var(--cmds-green) 0%, var(--cmds-green-bright) 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            display: inline-block;
+        }
+
+        body.dark-mode .hero-title .grad {
+            background-image: linear-gradient(135deg, var(--cmds-pink-light) 0%, var(--cmds-pink) 100%);
+        }
+
+        .hero-subtitle {
+            font-size: clamp(14px, 1.5vw, 17px);
+            color: var(--fg-muted);
+            font-weight: 500;
+            letter-spacing: -0.01em;
+        }
+
+        /* ═══════════════ HEADER ═══════════════ */
+        .site-header {
+            position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+            height: var(--header-h);
+            background: color-mix(in srgb, var(--bg) 72%, transparent);
+            backdrop-filter: saturate(180%) blur(20px);
+            -webkit-backdrop-filter: saturate(180%) blur(20px);
+            border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+            display: flex; align-items: center;
+            justify-content: center;
+            padding: 0 20px;
+            transition: background-color 0.3s, border-color 0.3s;
+        }
+        
+        .header-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .brand {
+            display: flex; align-items: center; gap: 10px;
+            font-weight: 700; font-size: 15px;
+            color: var(--fg);
+            letter-spacing: -0.018em;
+            text-decoration: none;
+        }
+        
+        .brand-mark {
+            width: 24px; height: 24px;
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 10px;
+            color: var(--accent);
+            flex-shrink: 0;
+            transition: color 0.3s;
         }
 
-        header p {
-            color: var(--text-muted);
-            font-size: 1rem;
+        .brand-subtitle {
+            font-size: 13px;
+            color: var(--fg-muted);
             font-weight: 500;
+            margin-left: auto;
+            margin-right: 15px;
+            padding-right: 15px;
+            border-right: 1px solid var(--border-strong);
         }
+        
+        @media (max-width: 480px) {
+            .brand-subtitle {
+                display: none;
+            }
+        }
+
+        .icon-btn {
+            width: 36px; height: 36px;
+            display: grid; place-items: center;
+            border: 1px solid var(--border-strong);
+            background: var(--bg-elev);
+            color: var(--fg-muted);
+            border-radius: 999px;
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            outline: none;
+        }
+        .icon-btn:hover {
+            background: var(--bg-subtle);
+            color: var(--fg);
+            transform: scale(1.05);
+            border-color: var(--accent);
+        }
+        .icon-btn svg { width: 16px; height: 16px; }
 
         /* Card Layout */
         .card {
-            background-color: var(--background);
+            background-color: var(--bg-elev);
             border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 30px;
+            border-radius: 16px;
+            padding: 24px;
             margin-bottom: 24px;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.02);
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        .card:hover {
+            border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+            transform: translateY(-2px);
+            box-shadow: 0 12px 32px -12px color-mix(in srgb, var(--accent) 15%, transparent);
         }
 
         .card-title {
-            font-size: 1.2rem;
-            font-weight: 600;
+            font-size: 1.15rem;
+            font-weight: 700;
             margin-bottom: 20px;
-            color: var(--primary);
+            color: var(--fg);
             display: flex;
             align-items: center;
             justify-content: space-between;
+            font-family: var(--font-display);
+            letter-spacing: -0.02em;
         }
 
         /* Form Controls */
@@ -89,30 +242,45 @@
             display: block;
             font-weight: 600;
             margin-bottom: 8px;
-            font-size: 0.95rem;
+            font-size: 0.9rem;
+            color: var(--fg);
         }
 
         .input-text {
             width: 100%;
-            padding: 12px;
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            font-size: 0.95rem;
-            background-color: var(--surface);
-            color: var(--text-main);
+            padding: 10px 14px;
+            border: 1px solid var(--border-strong);
+            border-radius: 8px;
+            font-size: 0.92rem;
+            background-color: var(--bg-subtle);
+            color: var(--fg);
             outline: none;
-            transition: border-color 0.2s;
+            transition: all 0.2s ease;
         }
 
         .input-text:focus {
-            border-color: var(--primary);
-            background-color: var(--background);
+            border-color: var(--accent);
+            background-color: var(--bg-elev);
+            box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent);
+        }
+
+        select.input-text {
+            appearance: none;
+            background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%234a544f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+            background-size: 16px;
+            padding-right: 36px;
+        }
+
+        body.dark-mode select.input-text {
+            background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%239aa39d' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>");
         }
 
         .options-row {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 15px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
             align-items: center;
             margin-bottom: 24px;
             padding-top: 5px;
@@ -125,13 +293,19 @@
             font-weight: 500;
             cursor: pointer;
             user-select: none;
-            font-size: 0.95rem;
+            font-size: 0.9rem;
+            color: var(--fg-muted);
+            transition: color 0.2s;
+        }
+        
+        .checkbox-label:hover {
+            color: var(--fg);
         }
 
         .checkbox-label input {
-            width: 18px;
-            height: 18px;
-            accent-color: var(--primary);
+            width: 16px;
+            height: 16px;
+            accent-color: var(--accent);
             cursor: pointer;
         }
 
@@ -139,7 +313,8 @@
             display: flex;
             align-items: center;
             gap: 10px;
-            font-size: 0.95rem;
+            font-size: 0.9rem;
+            color: var(--fg-muted);
         }
 
         .workers-group label {
@@ -147,69 +322,98 @@
         }
 
         .input-number {
-            width: 70px;
+            width: 60px;
             padding: 8px;
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            background-color: var(--surface);
-            font-size: 0.95rem;
+            border: 1px solid var(--border-strong);
+            border-radius: 8px;
+            background-color: var(--bg-subtle);
+            color: var(--fg);
+            font-size: 0.9rem;
+            font-weight: 600;
             outline: none;
             text-align: center;
+            transition: all 0.2s ease;
+        }
+        
+        .input-number:focus {
+            border-color: var(--accent);
+            background-color: var(--bg-elev);
+            box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent);
         }
 
         .button-group {
             display: flex;
             gap: 12px;
+            flex-wrap: wrap;
         }
 
         .btn {
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            padding: 14px 20px;
-            font-size: 1rem;
+            gap: 8px;
+            padding: 12px 24px;
+            font-size: 0.95rem;
             font-weight: 600;
-            border-radius: 6px;
-            border: none;
+            border-radius: 999px;
+            border: 1px solid transparent;
             cursor: pointer;
-            transition: background-color 0.2s, opacity 0.2s;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
             outline: none;
+            letter-spacing: -0.01em;
         }
 
         .btn:disabled {
-            opacity: 0.6;
+            opacity: 0.5;
             cursor: not-allowed;
         }
 
         .btn-primary {
-            background-color: var(--primary);
-            color: var(--background);
+            background-color: var(--accent);
+            color: var(--accent-on);
             flex: 2;
+            min-width: 150px;
+            box-shadow: 0 4px 14px -4px color-mix(in srgb, var(--accent) 40%, transparent);
         }
 
         .btn-primary:hover:not(:disabled) {
-            background-color: var(--primary-hover);
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px -4px color-mix(in srgb, var(--accent) 50%, transparent);
+            background-color: color-mix(in srgb, var(--accent) 90%, #000);
+        }
+        
+        body.dark-mode .btn-primary {
+            color: #0b0f0d;
+        }
+
+        .btn-primary:active:not(:disabled) {
+            transform: scale(0.98);
         }
 
         .btn-secondary {
-            background-color: var(--surface);
-            color: var(--text-main);
-            border: 1px solid var(--border);
+            background-color: var(--bg-elev);
+            color: var(--fg);
+            border: 1px solid var(--border-strong);
             flex: 1;
+            min-width: 120px;
         }
 
         .btn-secondary:hover:not(:disabled) {
-            background-color: var(--border);
+            background-color: var(--bg-subtle);
+            border-color: var(--fg-subtle);
         }
 
         .btn-danger {
             background-color: var(--fail);
-            color: var(--background);
+            color: #FFFFFF;
             flex: 1.5;
+            min-width: 120px;
+            box-shadow: 0 4px 14px -4px color-mix(in srgb, var(--fail) 40%, transparent);
         }
 
         .btn-danger:hover:not(:disabled) {
-            background-color: #B71C1C;
+            background-color: color-mix(in srgb, var(--fail) 90%, #000);
+            box-shadow: 0 6px 20px -4px color-mix(in srgb, var(--fail) 50%, transparent);
         }
 
         /* File List Preview */
@@ -218,29 +422,34 @@
         }
 
         .badge {
-            background-color: var(--primary);
-            color: var(--background);
+            background-color: var(--accent);
+            color: var(--accent-on);
             padding: 4px 10px;
-            border-radius: 12px;
+            border-radius: 999px;
             font-size: 0.8rem;
             font-weight: 600;
+            transition: all 0.3s;
+        }
+        
+        body.dark-mode .badge {
+            color: #0b0f0d;
         }
 
         .file-list {
             max-height: 200px;
             overflow-y: auto;
             border: 1px solid var(--border);
-            border-radius: 6px;
-            background-color: var(--surface);
-            padding: 10px;
+            border-radius: 10px;
+            background-color: var(--bg-subtle);
+            padding: 8px;
             list-style: none;
-            font-size: 0.9rem;
+            font-size: 0.88rem;
         }
 
         .file-item {
-            padding: 6px 8px;
+            padding: 8px 12px;
             border-bottom: 1px solid var(--border);
-            color: var(--text-main);
+            color: var(--fg);
             word-break: break-all;
         }
 
@@ -255,10 +464,10 @@
 
         .progress-bar-container {
             width: 100%;
-            height: 12px;
-            background-color: var(--surface);
+            height: 8px;
+            background-color: var(--bg-subtle);
             border: 1px solid var(--border);
-            border-radius: 6px;
+            border-radius: 999px;
             overflow: hidden;
             margin-bottom: 20px;
         }
@@ -266,20 +475,23 @@
         .progress-bar {
             height: 100%;
             width: 0%;
-            background-color: var(--primary);
-            transition: width 0.3s ease-in-out;
+            background-color: var(--accent);
+            border-radius: 999px;
+            transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
         .terminal {
             background-color: var(--terminal-bg);
-            border-radius: 6px;
-            padding: 15px;
-            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            border-radius: 12px;
+            padding: 16px;
+            font-family: var(--font-mono);
             font-size: 0.85rem;
-            color: #E0E0E6;
-            height: 300px;
+            color: var(--terminal-text);
+            height: 250px;
             overflow-y: auto;
             line-height: 1.6;
+            border: 1px solid var(--border);
+            box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.1);
         }
 
         .log-line {
@@ -287,9 +499,9 @@
             word-break: break-all;
         }
 
-        .status-ok { color: #81C784; }
-        .status-fail { color: #E57373; }
-        .status-skip { color: #FFB74D; }
+        .status-ok { color: var(--success); }
+        .status-fail { color: var(--fail); }
+        .status-skip { color: var(--skip); }
 
         /* Summary Panel */
         .summary-card {
@@ -305,20 +517,26 @@
         }
 
         .stat-box {
-            padding: 20px 10px;
-            border-radius: 8px;
-            background-color: var(--surface);
+            padding: 16px 10px;
+            border-radius: 12px;
+            background-color: var(--bg-subtle);
             border: 1px solid var(--border);
+            transition: all 0.2s ease;
+        }
+        
+        .stat-box:hover {
+            transform: scale(1.02);
         }
 
-        .stat-box.ok { border-color: #81C784; }
-        .stat-box.fail { border-color: #E57373; }
-        .stat-box.skip { border-color: #FFB74D; }
+        .stat-box.ok { border-color: var(--success); background-color: color-mix(in srgb, var(--success) 4%, var(--bg-subtle)); }
+        .stat-box.fail { border-color: var(--fail); background-color: color-mix(in srgb, var(--fail) 4%, var(--bg-subtle)); }
+        .stat-box.skip { border-color: var(--skip); background-color: color-mix(in srgb, var(--skip) 4%, var(--bg-subtle)); }
 
         .stat-number {
-            font-size: 2rem;
+            font-size: 1.8rem;
             font-weight: 700;
-            margin-bottom: 5px;
+            margin-bottom: 4px;
+            letter-spacing: -0.02em;
         }
 
         .stat-number.ok { color: var(--success); }
@@ -326,8 +544,8 @@
         .stat-number.skip { color: var(--skip); }
 
         .stat-label {
-            font-size: 0.9rem;
-            color: var(--text-muted);
+            font-size: 0.85rem;
+            color: var(--fg-muted);
             font-weight: 600;
         }
 
@@ -335,54 +553,294 @@
         footer {
             text-align: center;
             margin-top: 40px;
-            font-size: 0.85rem;
-            color: var(--text-muted);
+            font-size: 0.82rem;
+            color: var(--fg-subtle);
             font-weight: 500;
         }
 
         /* Spinner */
         .spinner {
             display: inline-block;
-            width: 16px;
-            height: 16px;
+            width: 14px;
+            height: 14px;
             border: 2px solid rgba(255,255,255,0.3);
             border-radius: 50%;
-            border-top-color: white;
+            border-top-color: currentColor;
             animation: spin 1s ease-in-out infinite;
-            margin-right: 8px;
         }
 
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
+
+        /* Tabs Styling */
+        .tabs {
+            display: inline-flex;
+            width: 100%;
+            background-color: var(--bg-subtle);
+            border-radius: 10px;
+            padding: 4px;
+            margin-bottom: 24px;
+            border: 1px solid var(--border);
+        }
+
+        .tab {
+            flex: 1;
+            text-align: center;
+            padding: 8px 16px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            border-radius: 8px;
+            color: var(--fg-muted);
+            border: none;
+            background: transparent;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .tab:hover {
+            color: var(--fg);
+        }
+
+        .tab.active {
+            color: var(--accent);
+            background-color: var(--bg-elev);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Dropzone Styling */
+        .dropzone {
+            border: 2px dashed var(--border-strong);
+            border-radius: 12px;
+            padding: 40px 20px;
+            text-align: center;
+            background-color: var(--bg-subtle);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            margin-bottom: 20px;
+        }
+
+        .dropzone:hover, .dropzone.dragover {
+            border-color: var(--accent);
+            background-color: var(--accent-soft);
+        }
+
+        .dropzone-icon {
+            display: flex;
+            justify-content: center;
+            color: var(--accent);
+            margin-bottom: 12px;
+            transition: transform 0.2s ease;
+        }
+        
+        .dropzone:hover .dropzone-icon {
+            transform: translateY(-4px);
+        }
+
+        .dropzone-text {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--fg);
+        }
+
+        .dropzone-subtext {
+            font-size: 0.82rem;
+            color: var(--fg-subtle);
+            margin-top: 6px;
+        }
+
+        .uploaded-file-list {
+            margin-top: 15px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background-color: var(--bg-elev);
+            max-height: 150px;
+            overflow-y: auto;
+            list-style: none;
+            padding: 0;
+            transition: all 0.3s;
+        }
+
+        .uploaded-file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 14px;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.88rem;
+            color: var(--fg);
+        }
+
+        .uploaded-file-item:last-child {
+            border-bottom: none;
+        }
+
+        .remove-file-btn {
+            background: none;
+            border: none;
+            color: var(--fail);
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 1.1rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            transition: background-color 0.2s;
+        }
+        
+        .remove-file-btn:hover {
+            background-color: color-mix(in srgb, var(--fail) 10%, transparent);
+        }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-strong);
+            border-radius: 999px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--fg-subtle);
+        }
     </style>
 </head>
 <body>
 
+<!-- HEADER -->
+<header class="site-header">
+    <div class="header-container">
+        <a class="brand" href="/">
+            <span class="brand-mark">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                    <polyline points="10 9 9 9 8 9"></polyline>
+                </svg>
+            </span>
+            <span>HWP/PDF to Markdown</span>
+        </a>
+        <div style="display: flex; align-items: center; gap: 12px; margin-left: auto;">
+            <a href="/pdf2jpg/" class="btn btn-secondary" style="padding: 6px 12px; font-size: 0.85rem; height: auto; border-radius: 999px; text-decoration: none; display: inline-flex; align-items: center; gap: 6px;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                    <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                    <polyline points="21 15 16 10 5 21"></polyline>
+                </svg>
+                PDF to JPG 변환기
+            </a>
+            <button class="icon-btn" id="themeToggleBtn" onclick="toggleTheme()" title="화면 테마 전환">
+                <svg id="themeToggleBtnSvg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+            </button>
+        </div>
+    </div>
+</header>
+
 <div class="container">
-    <!-- Header -->
-    <header>
-        <h1>📂 문서(HWP/PDF) → Markdown 변환기</h1>
-        <p>라온동행교회 | 쉬운목사</p>
-    </header>
+    <!-- Hero Section -->
+    <div class="hero-section">
+        <h1 class="hero-title">HWP/PDF to <span class="grad">Markdown</span></h1>
+    </div>
 
     <!-- Settings Card -->
     <div class="card">
         <div class="card-title">변환 설정</div>
         
-        <div class="form-group">
-            <label for="inputFolder">문서 파일(HWP/PDF) 폴더 경로</label>
-            <input type="text" id="inputFolder" class="input-text" placeholder="예: /Users/galeb76/Documents">
+        <!-- Tabs bar -->
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab('folderMode')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                </svg>
+                폴더 경로 지정
+            </div>
+            <div class="tab" onclick="switchTab('uploadMode')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="17 8 12 3 7 8"></polyline>
+                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                파일 직접 업로드
+            </div>
         </div>
 
-        <div class="form-group">
-            <label for="vaultPath">Obsidian 보관소(Vault) 저장 경로</label>
+        <!-- Folder Mode Content -->
+        <div id="folderModeContent" class="tab-content active">
+            <div class="form-group">
+                <label for="inputFolder">문서 파일(HWP/PDF) 폴더 경로</label>
+                <input type="text" id="inputFolder" class="input-text" placeholder="예: /Users/galeb76/Documents">
+            </div>
+        </div>
+
+        <!-- Upload Mode Content -->
+        <div id="uploadModeContent" class="tab-content">
+            <div class="form-group">
+                <label>업로드할 문서 파일 (HWP/PDF)</label>
+                <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
+                    <div class="dropzone-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="17 8 12 3 7 8"></polyline>
+                            <line x1="12" y1="3" x2="12" y2="15"></line>
+                        </svg>
+                    </div>
+                    <div class="dropzone-text">마우스로 파일을 끌어오거나 클릭하여 선택하세요</div>
+                    <div class="dropzone-subtext">(여러 개 선택 가능, HWP 및 PDF 지원)</div>
+                </div>
+                <input type="file" id="fileInput" multiple accept=".hwp,.pdf" style="display: none;" onchange="handleFileSelection(this.files)">
+                <ul id="selectedFileList" class="uploaded-file-list" style="display: none;"></ul>
+            </div>
+        </div>
+
+        <div class="form-group" style="margin-top: 20px;">
+            <label for="vaultPath">Obsidian 보관소(Vault) 저장 경로 (선택)</label>
             <input type="text" id="vaultPath" class="input-text" value="/Users/galeb76/Library/Mobile Documents/iCloud~md~obsidian/Documents/Easypaster/000_Inbox/004_한글변환">
         </div>
 
         <div class="form-group">
-            <label for="apiKey">Gemini API Key (선택 - 설교 분석 및 요약용)</label>
-            <input type="password" id="apiKey" class="input-text" placeholder="입력 시 설교 요약(3가지 요약/전체 요약) 및 신학 태그가 상단에 추가됩니다.">
+            <label for="apiKey">Gemini API Key (선택: AI 요약 및 텍스트 보정 기능 활성화)</label>
+            <input type="password" id="apiKey" class="input-text" placeholder="Gemini API Key를 입력하세요 (AI 요약/보정 전용)">
+        </div>
+
+        <!-- Google Gemini Subscription Connection UI -->
+        <div class="form-group" style="padding: 14px; border: 1px dashed var(--border-strong); border-radius: 12px; background: var(--bg-subtle); margin-bottom: 24px; transition: all 0.3s ease;">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
+                <div>
+                    <div style="font-weight: 600; font-size: 0.92rem; color: var(--fg); display: flex; align-items: center; gap: 6px;">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="color: var(--accent);">
+                            <path d="M12.24 10.285V14.4h6.887c-.648 2.41-2.519 4.114-5.136 4.114-3.44 0-6.228-2.77-6.228-6.2s2.788-6.2 6.228-6.2c1.54 0 2.94.55 4.03 1.458l3.11-3.11C19.29 2.73 15.975 1.5 12.24 1.5 6.244 1.5 1.5 6.244 1.5 12.24s4.744 10.74 10.74 10.74c5.996 0 10.74-4.744 10.74-10.74 0-.74-.085-1.46-.24-2.155H12.24z"/>
+                        </svg>
+                        Google Gemini 구독 연동
+                    </div>
+                    <div id="oauthStatusMsg" style="font-size: 0.8rem; color: var(--fg-muted); margin-top: 4px;">Gemini Advanced 등 유료 구독 계정을 연동하면 API Key 없이 사용 가능합니다.</div>
+                </div>
+                <div id="oauthActionContainer">
+                    <button type="button" id="oauthBtn" class="btn btn-secondary" style="padding: 8px 16px; font-size: 0.85rem; min-width: auto; height: 36px;" onclick="connectGoogleOAuth()">
+                        Google 계정 연결
+                    </button>
+                </div>
+            </div>
         </div>
 
         <div class="form-group">
@@ -394,7 +852,7 @@
         </div>
 
         <div class="options-row">
-            <label class="checkbox-label">
+            <label class="checkbox-label" id="recursiveOptionLabel">
                 <input type="checkbox" id="recursive">
                 하위폴더 포함 (recursive)
             </label>
@@ -411,8 +869,19 @@
         </div>
 
         <div class="button-group">
-            <button type="button" id="scanBtn" class="btn btn-secondary" onclick="scanFiles()">파일 목록 확인</button>
-            <button type="button" id="startBtn" class="btn btn-primary" onclick="startConversion()">변환 시작</button>
+            <button type="button" id="scanBtn" class="btn btn-secondary" onclick="scanFiles()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                파일 목록 확인
+            </button>
+            <button type="button" id="startBtn" class="btn btn-primary" onclick="startConversion()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                </svg>
+                변환 시작
+            </button>
         </div>
     </div>
 
@@ -444,35 +913,182 @@
         <div class="stats-grid">
             <div class="stat-box ok">
                 <div id="statOk" class="stat-number ok">0</div>
-                <div class="stat-label">✅ 성공</div>
+                <div class="stat-label">성공</div>
             </div>
             <div class="stat-box fail">
                 <div id="statFail" class="stat-number fail">0</div>
-                <div class="stat-label">❌ 실패</div>
+                <div class="stat-label">실패</div>
             </div>
             <div class="stat-box skip">
                 <div id="statSkip" class="stat-number skip">0</div>
-                <div class="stat-label">⏭ 건너뜀</div>
+                <div class="stat-label">건너뜀</div>
             </div>
         </div>
         <div class="button-group">
-            <button type="button" class="btn btn-primary" onclick="openVaultInObsidian()">Obsidian에서 열기</button>
-            <button type="button" id="retryBtn" class="btn btn-danger" style="display: none;" onclick="startConversion(true)">실패 파일 재시도</button>
-            <button type="button" class="btn btn-secondary" onclick="resetUI()">다시 변환</button>
+            <button type="button" id="openVaultBtn" class="btn btn-primary" onclick="openVaultInObsidian()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path>
+                </svg>
+                Obsidian에서 열기
+            </button>
+            <button type="button" id="downloadZipBtn" class="btn btn-primary" style="display: none; background-color: var(--success); border-color: var(--success); box-shadow: 0 4px 14px -4px color-mix(in srgb, var(--success) 40%, transparent);" onclick="downloadConvertedZip()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                변환 파일 다운로드 (.zip)
+            </button>
+            <button type="button" id="retryBtn" class="btn btn-danger" style="display: none;" onclick="startConversion(true)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path>
+                </svg>
+                실패 파일 재시도
+            </button>
+            <button type="button" class="btn btn-secondary" onclick="resetUI()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 5v14M5 12h14"></path>
+                </svg>
+                다시 변환
+            </button>
         </div>
     </div>
 
     <!-- Footer -->
     <footer>
-        라온동행교회 쉬운목사 | 자비스 자동화 시스템
+        HWP/PDF to Markdown
     </footer>
 </div>
 
 <script>
     let activeTotalCount = 0;
     let failedFiles = [];
+    let uploadedFilesList = [];
+    let currentZipUrl = null;
+    let isUserAuthenticated = false;
+
+    async function checkOAuthStatus() {
+        try {
+            const res = await fetch('/oauth/status');
+            const data = await res.json();
+            const statusMsg = document.getElementById('oauthStatusMsg');
+            const container = document.getElementById('oauthActionContainer');
+            
+            if (data.authenticated) {
+                isUserAuthenticated = true;
+                statusMsg.innerHTML = `<span style="color: var(--success); font-weight: 600;">연동됨:</span> ${data.email || 'Google 계정'} <span style="color: var(--fg-muted); font-size: 0.75rem;">(API Key 없이 요약/OCR 자동 수행)</span>`;
+                container.innerHTML = `
+                    <button type="button" class="btn btn-secondary" style="padding: 8px 16px; font-size: 0.85rem; min-width: auto; height: 36px; border-color: var(--fail); color: var(--fail);" onclick="disconnectGoogleOAuth()">
+                        연동 해제
+                    </button>
+                `;
+            } else {
+                isUserAuthenticated = false;
+                if (data.error) {
+                    statusMsg.innerHTML = `<span style="color: var(--fail); font-weight: 600;">오류:</span> ${data.error}`;
+                } else {
+                    statusMsg.innerHTML = `Gemini Advanced 등 유료 구독 계정을 연동하면 API Key 없이 사용 가능합니다.`;
+                }
+                container.innerHTML = `
+                    <button type="button" id="oauthBtn" class="btn btn-secondary" style="padding: 8px 16px; font-size: 0.85rem; min-width: auto; height: 36px;" onclick="connectGoogleOAuth()">
+                        Google 계정 연결
+                    </button>
+                `;
+            }
+        } catch (e) {
+            console.error("Failed to check OAuth status:", e);
+        }
+    }
+
+    async function connectGoogleOAuth() {
+        const btn = document.getElementById('oauthBtn');
+        if (btn) btn.disabled = true;
+        
+        const statusMsg = document.getElementById('oauthStatusMsg');
+        statusMsg.innerHTML = `<span style="color: var(--accent); font-weight: 600;">연동을 준비하는 중...</span> 포트 8085에서 콜백 대기 중입니다.`;
+        
+        try {
+            const res = await fetch('/oauth/start', { method: 'POST' });
+            const data = await res.json();
+            
+            if (data.url) {
+                window.open(data.url, '_blank');
+                statusMsg.innerHTML = `<span style="color: var(--accent); font-weight: 600;">브라우저 인증창 확인 요망:</span> 구글 로그인을 진행해 주세요.`;
+                
+                let attempts = 0;
+                const interval = setInterval(async () => {
+                    attempts++;
+                    try {
+                        const statusRes = await fetch('/oauth/status');
+                        const statusData = await statusRes.json();
+                        if (statusData.authenticated) {
+                            clearInterval(interval);
+                            await checkOAuthStatus();
+                            alert("구글 계정이 성공적으로 연동되었습니다!");
+                        } else if (statusData.error || attempts > 150) {
+                            clearInterval(interval);
+                            await checkOAuthStatus();
+                        }
+                    } catch (err) {
+                        console.error(err);
+                    }
+                }, 2000);
+            } else if (data.error) {
+                statusMsg.innerHTML = `<span style="color: var(--fail); font-weight: 600;">오류:</span> ${data.error}`;
+                if (btn) btn.disabled = false;
+            }
+        } catch (e) {
+            statusMsg.innerHTML = `<span style="color: var(--fail); font-weight: 600;">연동 실패:</span> 서버 통신 오류`;
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    async function disconnectGoogleOAuth() {
+        if (!confirm("Google 계정 연동을 해제하시겠습니까?")) return;
+        try {
+            await fetch('/oauth/disconnect', { method: 'POST' });
+            checkOAuthStatus();
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+    function toggleTheme() {
+        const currentTheme = document.documentElement.dataset.theme || 'light';
+        const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+        applyTheme(newTheme);
+    }
+
+    function applyTheme(theme) {
+        document.documentElement.dataset.theme = theme;
+        const body = document.body;
+        const iconSvg = document.getElementById('themeToggleBtnSvg');
+        localStorage.setItem('theme', theme);
+        
+        if (theme === 'dark') {
+            body.classList.add('dark-mode');
+            if (iconSvg) {
+                iconSvg.innerHTML = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
+            }
+        } else {
+            body.classList.remove('dark-mode');
+            if (iconSvg) {
+                iconSvg.innerHTML = '<circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
+            }
+        }
+    }
 
     document.addEventListener('DOMContentLoaded', () => {
+        // Check Google OAuth status on load
+        checkOAuthStatus();
+
+        // Initialize Theme from localStorage or prefers-color-scheme
+        let theme = localStorage.getItem('theme');
+        if (!theme) {
+            theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+        applyTheme(theme);
+
         if (localStorage.getItem('inputFolder')) {
             document.getElementById('inputFolder').value = localStorage.getItem('inputFolder');
         }
@@ -490,7 +1106,104 @@
         if (localStorage.getItem('forceOcr') === 'true') {
             document.getElementById('forceOcr').checked = true;
         }
+
+        // Drag and drop event listeners
+        const dropzone = document.getElementById('dropzone');
+        if (dropzone) {
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropzone.addEventListener(eventName, (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    dropzone.classList.add('dragover');
+                }, false);
+            });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropzone.addEventListener(eventName, (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    dropzone.classList.remove('dragover');
+                }, false);
+            });
+
+            dropzone.addEventListener('drop', (e) => {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                handleFileSelection(files);
+            }, false);
+        }
     });
+
+    function switchTab(mode) {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        
+        if (mode === 'folderMode') {
+            document.querySelector('.tabs .tab:nth-child(1)').classList.add('active');
+            document.getElementById('folderModeContent').classList.add('active');
+            document.getElementById('scanBtn').style.display = 'inline-flex';
+            document.getElementById('recursiveOptionLabel').style.display = 'inline-flex';
+        } else {
+            document.querySelector('.tabs .tab:nth-child(2)').classList.add('active');
+            document.getElementById('uploadModeContent').classList.add('active');
+            document.getElementById('scanBtn').style.display = 'none';
+            document.getElementById('recursiveOptionLabel').style.display = 'none';
+        }
+    }
+
+    function handleFileSelection(files) {
+        for (const file of files) {
+            const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+            if (ext !== '.hwp' && ext !== '.pdf') {
+                alert(`HWP와 PDF 파일만 업로드할 수 있습니다: ${file.name}`);
+                continue;
+            }
+            if (uploadedFilesList.some(f => f.name === file.name && f.size === file.size)) {
+                continue;
+            }
+            uploadedFilesList.push(file);
+        }
+        renderUploadedFiles();
+    }
+
+    function renderUploadedFiles() {
+        const fileListUl = document.getElementById('selectedFileList');
+        fileListUl.innerHTML = '';
+        
+        if (uploadedFilesList.length === 0) {
+            fileListUl.style.display = 'none';
+            return;
+        }
+        
+        uploadedFilesList.forEach((file, index) => {
+            const li = document.createElement('li');
+            li.className = 'uploaded-file-item';
+            
+            const nameSpan = document.createElement('span');
+            nameSpan.textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+            li.appendChild(nameSpan);
+            
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.className = 'remove-file-btn';
+            removeBtn.innerHTML = '&times;';
+            removeBtn.onclick = () => {
+                uploadedFilesList.splice(index, 1);
+                renderUploadedFiles();
+            };
+            li.appendChild(removeBtn);
+            
+            fileListUl.appendChild(li);
+        });
+        
+        fileListUl.style.display = 'block';
+    }
+
+    function downloadConvertedZip() {
+        if (currentZipUrl) {
+            window.location.href = currentZipUrl;
+        }
+    }
 
     async function scanFiles() {
         const inputFolder = document.getElementById('inputFolder').value.trim();
@@ -552,6 +1265,7 @@
     }
 
     async function startConversion(isRetry = false) {
+        const isUploadMode = document.getElementById('uploadModeContent').classList.contains('active');
         const inputFolder = document.getElementById('inputFolder').value.trim();
         const vaultPath = document.getElementById('vaultPath').value.trim();
         const apiKey = document.getElementById('apiKey').value.trim();
@@ -561,7 +1275,9 @@
         const workers = parseInt(document.getElementById('workers').value) || 4;
         const forceOcr = document.getElementById('forceOcr').checked;
         
-        localStorage.setItem('inputFolder', inputFolder);
+        if (!isUploadMode) {
+            localStorage.setItem('inputFolder', inputFolder);
+        }
         localStorage.setItem('vaultPath', vaultPath);
         localStorage.setItem('apiKey', apiKey);
         localStorage.setItem('overwriteMode', overwriteMode);
@@ -575,12 +1291,12 @@
         const progressBar = document.getElementById('progressBar');
         const resultCard = document.getElementById('resultCard');
 
-        if (!inputFolder) {
+        if (!isUploadMode && !inputFolder) {
             alert('문서 파일 폴더 경로를 입력해주세요.');
             return;
         }
-        if (!vaultPath) {
-            alert('Obsidian 보관소 경로를 입력해주세요.');
+        if (isUploadMode && uploadedFilesList.length === 0) {
+            alert('업로드할 파일을 최소 하나 이상 선택해주세요.');
             return;
         }
 
@@ -614,28 +1330,48 @@
         progressCard.scrollIntoView({ behavior: 'smooth' });
 
         try {
-            const payload = {
-                input_folder: inputFolder,
-                vault_path: vaultPath,
-                overwrite: overwrite,
-                recursive: recursive,
-                workers: workers,
-                force_ocr: forceOcr
-            };
-            if (apiKey) {
-                payload.api_key = apiKey;
-            }
-            if (isRetry && filesToSubmit) {
-                payload.files = filesToSubmit;
-            }
+            let response;
+            if (isUploadMode) {
+                const formData = new FormData();
+                formData.append('vault_path', vaultPath);
+                formData.append('overwrite', overwrite);
+                formData.append('workers', workers);
+                formData.append('force_ocr', forceOcr);
+                if (apiKey) {
+                    formData.append('api_key', apiKey);
+                }
+                uploadedFilesList.forEach(file => {
+                    formData.append('files', file);
+                });
+                
+                response = await fetch('/convert-upload', {
+                    method: 'POST',
+                    body: formData
+                });
+            } else {
+                const payload = {
+                    input_folder: inputFolder,
+                    vault_path: vaultPath,
+                    overwrite: overwrite,
+                    recursive: recursive,
+                    workers: workers,
+                    force_ocr: forceOcr
+                };
+                if (apiKey) {
+                    payload.api_key = apiKey;
+                }
+                if (isRetry && filesToSubmit) {
+                    payload.files = filesToSubmit;
+                }
 
-            const response = await fetch('/convert', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(payload)
-            });
+                response = await fetch('/convert', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(payload)
+                });
+            }
 
             if (!response.ok) {
                 const errData = await response.json();
@@ -738,7 +1474,23 @@
                             logFeed.appendChild(finishLine);
                             logFeed.scrollTop = logFeed.scrollHeight;
 
-                            if (failedFiles.length > 0) {
+                            // Handle ZIP download
+                            const downloadZipBtn = document.getElementById('downloadZipBtn');
+                            if (data.zip_url) {
+                                currentZipUrl = data.zip_url;
+                                downloadZipBtn.style.display = 'inline-flex';
+                            } else {
+                                currentZipUrl = null;
+                                downloadZipBtn.style.display = 'none';
+                            }
+
+                            // Show/hide Obsidian button based on vault path presence
+                            const openVaultBtn = document.getElementById('openVaultBtn');
+                            if (openVaultBtn) {
+                                openVaultBtn.style.display = vaultPath ? 'inline-flex' : 'none';
+                            }
+
+                            if (failedFiles.length > 0 && !isUploadMode) {
                                 retryBtn.style.display = 'inline-flex';
                                 retryBtn.disabled = false;
                             } else {
@@ -796,9 +1548,15 @@
         document.getElementById('progressCard').style.display = 'none';
         document.getElementById('resultCard').style.display = 'none';
         document.getElementById('retryBtn').style.display = 'none';
+        document.getElementById('downloadZipBtn').style.display = 'none';
         document.getElementById('logFeed').innerHTML = '';
         document.getElementById('progressBar').style.width = '0%';
         failedFiles = [];
+        uploadedFilesList = [];
+        const fileInput = document.getElementById('fileInput');
+        if (fileInput) fileInput.value = '';
+        renderUploadedFiles();
+        currentZipUrl = null;
         window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 </script>
