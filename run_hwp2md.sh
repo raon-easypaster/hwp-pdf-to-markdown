@@ -1,15 +1,9 @@
 #!/bin/bash
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
-DIR="/Users/galeb76/Documents/tools/hwp2obsidian"
-cd "$DIR"
-
-# Clean old processes safely
-if lsof -Pi :5001 -sTCP:LISTEN -t >/dev/null ; then
-    kill -9 $(lsof -t -i :5001) 2>/dev/null
-    sleep 1
+# Compatibility launcher for existing macOS app wrappers.
+set -e
+RUNTIME="$HOME/Applications/hwp-pdf-to-markdown"
+if [ -x "$RUNTIME/venv/bin/python3" ] && [ -f "$RUNTIME/start-silent.py" ]; then
+  exec "$RUNTIME/venv/bin/python3" "$RUNTIME/start-silent.py" "$@"
 fi
-
-source venv/bin/activate
-python app.py > /dev/null 2>&1 &
-sleep 1.5
-open http://localhost:5001
+echo '먼저 run.command를 한 번 실행하여 설치해 주세요.' >&2
+exit 1
